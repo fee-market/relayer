@@ -28,8 +28,10 @@ Dev: `npm run dev` then `curl localhost:8787/health`.
 | Path | Command |
 |------|---------|
 | Ubuntu VPS (full guided) | `sudo bash scripts/vps/prepare.sh` then `npm run sponsor:vps` |
-| Plans + HTTPS on this box | `npm run sponsor:plans:configure` (writes plans, syncs `.env`, can start **Caddy** via Docker) |
-| HTTPS only | `npm run sponsor:serve` (Caddy + relayer; not Apache/nginx) |
+| Plans + HTTPS on this box | `npm run sponsor:plans:configure` (writes plans, syncs `.env`, can start the public endpoint) |
+| HTTPS (Caddy / Docker) | `npm run sponsor:serve` |
+| HTTPS (nginx or Apache) | `sudo bash scripts/vps/setup-proxy.sh nginx` — choose certbot / import PEM / self-signed / Cloudflare Flexible, then `npm run sponsor:serve` |
+| Validate public URL | `npm run sponsor:check-endpoint` — local + DNS + HTTPS; prints copyable Cloudflare / `.env` values |
 | Cloudflare Tunnel | `bash scripts/setup-tunnel.sh relay.yourdomain.com` |
 
 ### Updating a live node
@@ -61,7 +63,9 @@ Copy [`.env.example`](.env.example) — every variable is documented there. Mini
 |--------|----------------|
 | `sponsor:init` | Write `.env`, generate relayer key |
 | `sponsor:plans:configure` | Profile + plans → `sponsor.plans.json`; syncs public URL; can start Caddy |
-| `sponsor:serve` | Start/rebuild public HTTPS (Caddy + relayer via Docker Compose) |
+| `sponsor:serve` | Start public HTTPS (`PROXY_KIND`: caddy / nginx / apache) |
+| `sponsor:proxy` | Install/configure host nginx or Apache + Certbot (`sudo npm run sponsor:proxy -- nginx`) |
+| `sponsor:check-endpoint` | External check of the node URL + copyable DNS/SSL/`.env` settings |
 | `sponsor:vps` | Full guided VPS setup (`scripts/vps/setup.sh`) |
 | `sponsor:onboard` | Register / reuse sponsor, publish metadata |
 | `sponsor:go` | List plans and start the node |

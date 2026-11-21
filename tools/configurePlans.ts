@@ -206,21 +206,40 @@ async function main() {
   console.log(`\n✓ wrote ${PLAN_CONFIG_PATH.pathname} (${plans.length} plan${plans.length === 1 ? "" : "s"})`);
 
   console.log("\n── Public endpoint on this machine ──");
-  console.log("  HTTPS is terminated by Caddy in Docker Compose (not Apache/nginx).");
   console.log("  DNS: an A record for the hostname must already point at this server.");
+  note("1) Caddy via Docker (recommended)");
+  note("2) nginx + Certbot — Ubuntu package, security updates via apt");
+  note("3) Apache + Certbot — Ubuntu package, security updates via apt");
+  note("4) Skip for now");
   const { domain } = syncPublicEnv(relayerEndpoint);
 
-  const canDocker = dockerReady();
-  if (!canDocker) {
-    console.log("  ! Docker Compose not available here — install with: sudo bash scripts/vps/prepare.sh");
-    console.log("  Then: npm run sponsor:serve");
+  const proxyChoice = (await ask("  HTTPS front-end", "1")).toLowerCase();
+  if (proxyChoice === "2" || proxyChoice === "nginx") {
+    if (existsSync(ENV_PATH)) writeEnvKey("PROXY_KIND", "nginx");
     rl.close();
-  } else if (await askYesNo(`Start HTTPS for ${domain} with Caddy + relayer now?`, true)) {
+    console.log(`  → sudo bash scripts/vps/setup-proxy.sh nginx --domain ${domain}`);
+    console.log("  → then: npm run sponsor:serve");
+  } else if (proxyChoice === "3" || proxyChoice === "apache") {
+    if (existsSync(ENV_PATH)) writeEnvKey("PROXY_KIND", "apache");
     rl.close();
-    startPublicEndpoint();
+    console.log(`  → sudo bash scripts/vps/setup-proxy.sh apache --domain ${domain}`);
+    console.log("  → then: npm run sponsor:serve");
+  } else if (proxyChoice === "4" || proxyChoice === "skip" || proxyChoice === "n") {
+    rl.close();
+    console.log("  Skipped. Later: npm run sponsor:serve  or  sudo bash scripts/vps/setup-proxy.sh nginx|apache");
   } else {
-    rl.close();
-    console.log("  Skipped. Later: npm run sponsor:serve");
+    if (existsSync(ENV_PATH)) writeEnvKey("PROXY_KIND", "caddy");
+    if (!dockerReady()) {
+      rl.close();
+      console.log("  ! Docker Compose not available — sudo bash scripts/vps/prepare.sh");
+      console.log(`  Or: sudo bash scripts/vps/setup-proxy.sh nginx --domain ${domain}`);
+    } else if (await askYesNo(`Start HTTPS for ${domain} with Caddy + relayer now?`, true)) {
+      rl.close();
+      startPublicEndpoint();
+    } else {
+      rl.close();
+      console.log("  Skipped. Later: npm run sponsor:serve");
+    }
   }
 
   console.log("\nNext: `npm run sponsor:onboard -- --dry-run` to preview, then `npm run sponsor:onboard`.");

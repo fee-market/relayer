@@ -6,7 +6,7 @@
 #
 # It walks through nine steps and asks before each one: a normal user for the node, SSH with keys only, the
 # firewall (SSH, 80 and 443), automatic security updates, clock sync, a swap file on small servers, Docker,
-# Node 22, and handing the repository to the new user. Every step can be skipped, and running it again is safe:
+# Node.js LTS (security-patched), and handing the repository to the new user. Every step can be skipped, and running it again is safe:
 # a step that is already done says so. It installs nothing related to keys and never sees a secret.
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -217,9 +217,36 @@ fi
 
 # ---- 4. Firewall ----
 step "Firewall"
-note "Denies all incoming traffic except SSH (port $SSH_PORT), 80 and 443. Outgoing traffic stays open."
-note "Port 8787 (the node) stays closed: only Caddy talks to it, inside Docker."
+# How the node will be reached decides which ports stay open.
+note "Denies all other incoming traffic. Outgoing stays open."
+note "How will wallets reach this node?"
+note "  1) Docker + Caddy (recommended): HTTPS on 80/443; node stays internal"
+note "  2) nginx on the host: Ubuntu-packaged nginx + Certbot (apt security updates)"
+note "  3) Apache on the host: Ubuntu-packaged apache2 + Certbot (apt security updates)"
+note "  4) Bare Node: open the app port (no automatic HTTPS)"
+note "  5) Cloudflare Tunnel only: SSH only (no public app ports)"
+PUBLISH_MODE=docker
+RELAYER_PORT=8787
 if confirm "Set up the firewall?"; then
+  while true; do
+    ask PUBLISH_CHOICE "Publish mode: 1=Docker+Caddy, 2=nginx, 3=Apache, 4=bare Node, 5=tunnel" "1"
+    case "$PUBLISH_CHOICE" in
+      1 | docker | caddy) PUBLISH_MODE=docker; break ;;
+      2 | nginx) PUBLISH_MODE=nginx; break ;;
+      3 | apache | httpd) PUBLISH_MODE=apache; break ;;
+      4 | bare | node) PUBLISH_MODE=bare; break ;;
+      5 | tunnel) PUBLISH_MODE=tunnel; break ;;
+      *) say "  Enter 1–5." ;;
+    esac
+  done
+  if [ "$PUBLISH_MODE" = bare ]; then
+    while true; do
+      ask RELAYER_PORT "Node listen port to open in the firewall" "8787"
+      if printf '%s' "$RELAYER_PORT" | grep -Eq '^[0-9]+$' && [ "$RELAYER_PORT" -ge 1 ] && [ "$RELAYER_PORT" -le 65535 ]; then break; fi
+      say "  Enter a port number 1–65535."
+    done
+    warn "Bare Node has no TLS from this repo" "Prefer Docker+Caddy, nginx/Apache+Certbot, or a Cloudflare Tunnel"
+  fi
   note "SSH can be limited to one address. Only do that if your address never changes, or you lock yourself out."
   if [ -n "${SSH_CONNECTION:-}" ]; then note "You are connected from ${SSH_CONNECTION%% *}."; fi
   while true; do
@@ -234,12 +261,25 @@ if confirm "Set up the firewall?"; then
   else
     run ufw limit "$SSH_PORT/tcp"
   fi
-  run ufw allow 80/tcp
-  run ufw allow 443/tcp
+  case "$PUBLISH_MODE" in
+    docker | nginx | apache)
+      run ufw allow 80/tcp
+      run ufw allow 443/tcp
+      ok "Firewall is on (SSH + 80 + 443). Port 8787 stays closed — the proxy reaches the node on localhost."
+      ;;
+    bare)
+      run ufw allow "$RELAYER_PORT/tcp"
+      ok "Firewall is on (SSH + $RELAYER_PORT). No 80/443 — add TLS yourself or use a tunnel."
+      note "Run the node with HOST=0.0.0.0 PORT=$RELAYER_PORT (see .env)."
+      ;;
+    tunnel)
+      ok "Firewall is on (SSH only). App traffic goes through Cloudflare Tunnel."
+      note "After setup: bash scripts/setup-tunnel.sh relay.yourdomain.com"
+      ;;
+  esac
   run ufw --force enable
-  ok "Firewall is on"
-  note "Docker publishes container ports around ufw. The compose file only publishes 80 and 443, so that is fine here."
 else
+  PUBLISH_MODE=docker
   skip "Skipped"
 fi
 
@@ -295,7 +335,7 @@ else
 fi
 
 # ---- 8. Docker and Node ----
-step "Docker and Node 22"
+step "Docker and Node.js LTS"
 if have docker && docker compose version >/dev/null 2>&1; then
   ok "Docker and the compose plugin are installed"
 elif confirm "Install Docker from Docker's own package repository?"; then
@@ -316,6 +356,13 @@ EOF
   ok "Docker is installed"
 else
   skip "Docker skipped"
+  if [ "${PUBLISH_MODE:-docker}" = docker ]; then
+    warn "Firewall was set for Docker+Caddy, but Docker was skipped" "Either install Docker and use compose, or open the node port: sudo ufw allow 8787/tcp"
+    if have ufw && [ "$DRY" -eq 0 ] && confirm "Open port 8787 now for a bare Node process?"; then
+      run ufw allow 8787/tcp
+      ok "Port 8787 allowed. No automatic HTTPS — use a tunnel or put TLS in front."
+    fi
+  fi
 fi
 if have docker || [ "$DRY" -eq 1 ]; then
   if [ ! -e /etc/docker/daemon.json ]; then
@@ -343,18 +390,41 @@ EOF
   fi
 fi
 
+# Current Active LTS from NodeSource (receives security patches). Minimum supported major is 22.
+NODE_MIN_MAJOR=22
 NODE=$(node_major)
-if [ -n "$NODE" ] && [ "$NODE" -ge 22 ]; then
-  ok "Node.js $(node -v) is installed"
-elif confirm "Install Node.js 22 with NodeSource's setup script (their documented way; it adds their package repository)?"; then
+if [ -n "$NODE" ] && [ "$NODE" -ge "$NODE_MIN_MAJOR" ]; then
+  ok "Node.js $(node -v) is installed (meets >=$NODE_MIN_MAJOR)"
+  note "apt will keep applying NodeSource security updates for this major."
+elif confirm "Install Node.js LTS from NodeSource (current Active LTS, security-patched via apt)?"; then
   NODESOURCE_SCRIPT=$(mktemp)
-  run curl -fsSL https://deb.nodesource.com/setup_22.x -o "$NODESOURCE_SCRIPT"
+  # setup_lts.x tracks the current Active LTS line — not a frozen major like setup_22.x.
+  run curl -fsSL https://deb.nodesource.com/setup_lts.x -o "$NODESOURCE_SCRIPT"
   run bash "$NODESOURCE_SCRIPT"
   run apt-get install -y nodejs
   rm -f "$NODESOURCE_SCRIPT"
-  ok "Node.js is installed"
+  ok "Node.js $(node -v 2>/dev/null || echo LTS) is installed"
 else
-  skip "Node.js skipped (the sponsor commands need Node 22)"
+  skip "Node.js skipped (sponsor CLI needs Node >=$NODE_MIN_MAJOR; Docker image uses node:lts)"
+fi
+
+# Optional host reverse proxy (nginx / Apache) — Ubuntu packages + Certbot.
+if [ "${PUBLISH_MODE:-}" = nginx ] || [ "${PUBLISH_MODE:-}" = apache ]; then
+  section "HTTPS proxy: $PUBLISH_MODE"
+  note "Installs the Ubuntu $PUBLISH_MODE package (security updates via apt) and Certbot for Let's Encrypt."
+  note "The Node process will listen on 127.0.0.1 only; $PUBLISH_MODE terminates HTTPS on 80/443."
+  if [ "$DRY" -eq 1 ]; then
+    note "+ would run: bash scripts/vps/setup-proxy.sh $PUBLISH_MODE"
+  elif confirm "Install and configure $PUBLISH_MODE + Certbot now?"; then
+    PROXY_ARGS=("$PUBLISH_MODE")
+    if [ -f "$ENV_FILE" ]; then
+      d=$(env_get "$ENV_FILE" PUBLIC_DOMAIN)
+      [ -n "$d" ] && PROXY_ARGS+=(--domain "$d")
+    fi
+    bash "$VPS_DIR/setup-proxy.sh" "${PROXY_ARGS[@]}"
+  else
+    skip "Skipped. Later: sudo bash scripts/vps/setup-proxy.sh $PUBLISH_MODE"
+  fi
 fi
 
 # ---- 9. Hand the code to the node user ----
@@ -388,6 +458,27 @@ say "Next, as $NODE_USER (a fresh login, so the docker group applies):"
 printf '\n     ssh -p %s %s@%s\n' "$SSH_PORT" "$NODE_USER" "$(public_ipv4 || true)"
 printf '     cd %s\n' "$TARGET"
 printf '     bash scripts/vps/check.sh --domain relay.example.com   # what is still missing\n'
-printf '     bash scripts/vps/setup.sh                              # the guided node setup\n\n'
-note "Before setup.sh: point the A record of your domain at this server, and have your RPC URL and payout address ready."
+case "${PUBLISH_MODE:-docker}" in
+  nginx | apache)
+    printf '     npm run setup && npm run sponsor:init && npm run sponsor:plans:configure\n'
+    printf '     sudo bash scripts/vps/setup-proxy.sh %s --domain your.domain   # if not done above\n' "$PUBLISH_MODE"
+    printf '     npm run build && npm start                  # HOST=127.0.0.1; %s has HTTPS\n\n' "$PUBLISH_MODE"
+    note "$PUBLISH_MODE stays patched via apt. Renewals: certbot systemd timer."
+    ;;
+  bare)
+    printf '     npm run setup && npm run sponsor:init && npm run sponsor:plans:configure\n'
+    printf '     npm run build && HOST=0.0.0.0 npm start            # bare node (no HTTPS)\n'
+    printf '     # or: sudo bash scripts/vps/setup-proxy.sh nginx|apache\n'
+    printf '     # or: bash scripts/setup-tunnel.sh relay.yourdomain.com\n\n'
+    ;;
+  tunnel)
+    printf '     npm run setup && npm run sponsor:init && npm run sponsor:plans:configure\n'
+    printf '     npm run build && npm start\n'
+    printf '     bash scripts/setup-tunnel.sh relay.yourdomain.com\n\n'
+    ;;
+  *)
+    printf '     bash scripts/vps/setup.sh                              # guided node setup (Docker + Caddy)\n\n'
+    note "Before setup.sh: point the A record of your domain at this server, and have your RPC URL and payout address ready."
+    ;;
+esac
 note "Later upgrades: cd $TARGET && npm run update"

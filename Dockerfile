@@ -1,5 +1,6 @@
 # ─── build ───────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS build
+# node:lts tracks the current Active LTS and picks up security patches on rebuild.
+FROM node:lts-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --no-audit --no-fund --loglevel=error || npm install --no-audit --no-fund --loglevel=error
@@ -8,7 +9,7 @@ COPY src ./src
 RUN npm run build
 
 # ─── runtime ─────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS runtime
+FROM node:lts-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json* ./

@@ -4,6 +4,9 @@
   "private": true,
   "license": "MIT",
   "description": "Sponsor-side relayer for v1.fee.market \u2014 validates user delegations and broadcasts EIP-7702 (type-4) redemptions paying gas on the user's behalf.",
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "scripts": {
     "setup": "npm ci --no-audit --no-fund --loglevel=error",
@@ -32,6 +35,8 @@
     "sponsor:init": "tsx src/sponsor/init.ts",
     "sponsor:plans:configure": "tsx tools/configurePlans.ts",
     "sponsor:serve": "bash scripts/serve-public.sh",
+    "sponsor:proxy": "bash scripts/vps/setup-proxy.sh",
+    "sponsor:check-endpoint": "bash scripts/vps/check-endpoint.sh",
     "sponsor:vps": "bash scripts/vps/setup.sh",
     "sponsor:doctor": "tsx src/sponsor/doctor.ts",
     "test:doctor": "tsx tools/doctor.test.ts",

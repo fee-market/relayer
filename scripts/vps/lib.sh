@@ -293,3 +293,168 @@ relayer_balance_pol() {
 
 # Compares two positive decimal numbers: returns 0 when $1 < $2.
 num_lt() { awk -v a="$1" -v b="$2" 'BEGIN { exit !(a + 0 < b + 0) }'; }
+
+# ---- Public endpoint validation + copyable settings ----
+
+# http_code URL — prints status code or 000
+http_code() {
+  curl -sS --max-time 12 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || printf '000'
+}
+
+# verify_public_endpoint DOMAIN [PORT]
+# Checks localhost node, DNS, and the public URL (HTTPS). Returns 0 if public /live is 200
+# and /health is 200 or 503 (reachable).
+verify_public_endpoint() {
+  local domain=$1 port=${2:-8787} base ip a code_live code_health body tmp bad=0
+  base=$(public_relay_url "$domain")
+
+  section "Validate node URL"
+  note "Local node (must be running on 127.0.0.1:$port)…"
+  code_live=$(http_code "http://127.0.0.1:${port}/live")
+  if [ "$code_live" = 200 ]; then
+    ok "GET http://127.0.0.1:${port}/live → $code_live"
+  else
+    fail "GET http://127.0.0.1:${port}/live → ${code_live:-000}" "Start the node: cd $RELAYER_DIR && npm run build && HOST=127.0.0.1 PORT=$port npm start"
+    bad=1
+  fi
+
+  ip=$(public_ipv4)
+  a=$(resolve_a "$domain" | tr '\n' ' ' | sed 's/ $//')
+  if [ -z "$a" ]; then
+    fail "DNS: $domain has no A record" "Create an A record pointing at ${ip:-this server}"
+    bad=1
+  elif [ -n "$ip" ] && printf ' %s ' "$a" | grep -q " $ip "; then
+    ok "DNS: $domain → $a (this server)"
+  else
+    # Orange-cloud Cloudflare often resolves to CF anycast, not the origin IP — warn, don't fail.
+    warn "DNS: $domain → ${a:-?} (this server is ${ip:-unknown})" "If Cloudflare is orange-clouded that is normal; grey-cloud should match $ip"
+  fi
+
+  note "Public HTTPS (what wallets hit)…"
+  tmp=$(mktemp)
+  code_health=$(curl -sS --max-time 15 -o "$tmp" -w '%{http_code}' "$base/health" 2>/dev/null || printf '000')
+  code_live=$(http_code "$base/live")
+  body=$(head -c 400 "$tmp" 2>/dev/null || true)
+  rm -f "$tmp"
+
+  case "$code_live" in
+    200) ok "GET $base/live → $code_live" ;;
+    *)
+      fail "GET $base/live → ${code_live:-000}" "Check proxy/Caddy, firewall 80/443, TLS mode, and that the node is up"
+      bad=1
+      ;;
+  esac
+  case "$code_health" in
+    200)
+      ok "GET $base/health → 200 (ready)"
+      if printf '%s' "$body" | grep -q 'ok'; then ok "Health JSON looks valid"; fi
+      ;;
+    503)
+      warn "GET $base/health → 503 (reachable, not ready)" "Often low RELAYER balance or RPC — curl $base/health"
+      ;;
+    *)
+      fail "GET $base/health → ${code_health:-000}" "Proxy/TLS/DNS not reaching the node yet"
+      bad=1
+      ;;
+  esac
+
+  return "$bad"
+}
+
+# print_copyable_settings DOMAIN TLS_MODE PROXY_KIND [PORT]
+# Prints a copy-paste block of Cloudflare / DNS / .env values for the chosen TLS mode.
+print_copyable_settings() {
+  local domain=$1 tls=${2:-certbot} proxy=${3:-caddy} port=${4:-8787}
+  local base ip cf_ssl cf_proxy tip
+  base=$(public_relay_url "$domain")
+  ip=$(public_ipv4)
+  ip=${ip:-\<this-server-public-IP\>}
+
+  case "$tls" in
+    certbot)
+      cf_ssl="Full (strict)"
+      cf_proxy="DNS only (grey) until cert issued, then Proxied (orange) OK"
+      tip="Prefer Full (strict). If certbot fails behind orange cloud, grey-cloud temporarily."
+      ;;
+    import)
+      cf_ssl="Full (strict)"
+      cf_proxy="Proxied (orange) or DNS only"
+      tip="Certificate must be valid for $domain (SAN/CN)."
+      ;;
+    selfsigned)
+      cf_ssl="Full"
+      cf_proxy="Proxied (orange) OK"
+      tip="Do NOT use Full (strict) or Flexible with a self-signed origin cert."
+      ;;
+    cf-flexible)
+      cf_ssl="Flexible"
+      cf_proxy="Proxied (orange) required"
+      tip="Weaker: Cloudflare→origin is HTTP. Upgrade to Full (strict) + certbot when possible."
+      ;;
+    none)
+      cf_ssl="(n/a — HTTP only on origin)"
+      cf_proxy="DNS only, or terminate TLS elsewhere"
+      tip="Not for production wallets unless something else terminates HTTPS."
+      ;;
+    *)
+      cf_ssl="Full (strict) if origin has a real cert"
+      cf_proxy="Proxied or DNS only"
+      tip=""
+      ;;
+  esac
+
+  local dns_name
+  # Apex (example.com) → @; subdomain (node.example.com) → leftmost label
+  case "$domain" in
+    *.*)
+      if [ "$(printf '%s' "$domain" | awk -F. '{print NF}')" -le 2 ]; then
+        dns_name="@"
+      else
+        dns_name="${domain%%.*}"
+      fi
+      ;;
+    *) dns_name="$domain" ;;
+  esac
+
+  section "Copyable settings — update these"
+  printf '\n'
+  printf '%s# ── Cloudflare → DNS ───────────────────────────────────────%s\n' "$D" "$N"
+  printf 'Type:    A\n'
+  printf 'Name:    %s\n' "$dns_name"
+  printf 'Content: %s\n' "$ip"
+  printf 'Proxy:   %s\n' "$cf_proxy"
+  printf 'TTL:     Auto\n'
+  printf '\n'
+  printf '%s# ── Cloudflare → SSL/TLS → Overview ───────────────────────%s\n' "$D" "$N"
+  printf 'Encryption mode: %s\n' "$cf_ssl"
+  if [ -n "$tip" ]; then printf 'Note:            %s\n' "$tip"; fi
+  printf '\n'
+  printf '%s# ── Cloudflare → SSL/TLS → Edge Certificates (optional) ──%s\n' "$D" "$N"
+  printf 'Always Use HTTPS: On\n'
+  printf 'Minimum TLS:      1.2\n'
+  printf '\n'
+  printf '%s# ── Relayer .env (already set by setup if .env exists) ────%s\n' "$D" "$N"
+  printf 'PUBLIC_DOMAIN=%s\n' "$domain"
+  printf 'PUBLIC_RELAYER_URL=%s\n' "$base"
+  printf 'HOST=127.0.0.1\n'
+  printf 'PORT=%s\n' "$port"
+  printf 'TRUST_PROXY=1\n'
+  printf 'PROXY_KIND=%s\n' "$proxy"
+  printf 'TLS_MODE=%s\n' "$tls"
+  if [ "$tls" = cf-flexible ]; then
+    printf 'CLIENT_IP_HEADER=cf-connecting-ip\n'
+  else
+    printf 'CLIENT_IP_HEADER=x-forwarded-for\n'
+  fi
+  printf '\n'
+  printf '%s# ── What wallets / marketplace should use ─────────────────%s\n' "$D" "$N"
+  printf 'Relayer base URL:  %s\n' "$base"
+  printf 'Health check:      %s/health\n' "$base"
+  printf 'Relay endpoint:    %s/relay\n' "$base"
+  printf 'Subscribe:         %s/subscribe\n' "$base"
+  printf '\n'
+  printf '%s# ── Quick verify (from any machine) ───────────────────────%s\n' "$D" "$N"
+  printf 'curl -sS %s/live\n' "$base"
+  printf 'curl -sS %s/health\n' "$base"
+  printf '\n'
+}

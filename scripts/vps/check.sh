@@ -161,14 +161,22 @@ if have ss; then
   for p in $WILD; do
     case "$p" in
       "$SSH_PORT" | 80 | 443) ;;
-      8787) fail "Port 8787 (the node) listens on every interface" "It must be reachable through Caddy only; start it with docker compose, which keeps it internal" ;;
+      8787)
+        if have docker && docker compose version >/dev/null 2>&1 && [ -n "$(cd "$RELAYER_DIR" && docker compose ps -q caddy 2>/dev/null)" ]; then
+          fail "Port 8787 (the node) listens on every interface" "With Caddy running it should stay internal: use docker compose (expose only, no ports:)"
+        else
+          warn "Port 8787 listens publicly (bare-node mode)" "OK without Docker; put TLS in front or use Cloudflare Tunnel. Prefer Docker+Caddy for HTTPS."
+        fi
+        ;;
       *) EXTRA="$EXTRA $p" ;;
     esac
   done
   if [ -n "$EXTRA" ]; then
     warn "Other ports listen on every interface:$EXTRA" "Fine if the firewall blocks them. Note that ports published by Docker go around ufw"
-  else
+  elif have docker && docker info >/dev/null 2>&1; then
     ok "Nothing listens publicly besides SSH, 80 and 443"
+  else
+    ok "Public listeners checked (no unexpected extras)"
   fi
 fi
 
@@ -204,15 +212,15 @@ if have docker; then
     fail "This user cannot talk to Docker" "Add the user to the docker group (prepare.sh), then log out and in again"
   fi
 else
-  fail "Docker is not installed" "prepare.sh installs it"
+  warn "Docker is not installed" "Recommended for Caddy HTTPS. Bare node: open PORT in ufw and use a tunnel, or re-run prepare.sh and install Docker"
 fi
 NODE=$(node_major)
 if [ -z "$NODE" ]; then
-  fail "Node.js is not installed" "prepare.sh installs Node 22 (the sponsor commands need it)"
+  fail "Node.js is not installed" "prepare.sh installs Node.js LTS (sponsor CLI needs >= 22)"
 elif [ "$NODE" -lt 22 ]; then
-  fail "Node.js $NODE is too old" "The sponsor commands need Node 22"
+  fail "Node.js $NODE is too old" "Need >= 22; run prepare.sh to install the current LTS"
 else
-  ok "Node.js $(node -v 2>/dev/null)"
+  ok "Node.js $(node -v 2>/dev/null) (>= 22)"
 fi
 
 # ---- 6. Network and domain ----

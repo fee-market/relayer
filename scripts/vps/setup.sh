@@ -48,7 +48,7 @@ check_requirements() {
   if [ "$(id -u)" -eq 0 ]; then die "Run this as the node user, not root: the .env file and the key in it should not belong to root."; fi
   local node
   node=$(node_major)
-  if [ -z "$node" ] || [ "$node" -lt 22 ]; then die "Node.js 22 is needed (found: ${node:-none}). prepare.sh installs it."; fi
+  if [ -z "$node" ] || [ "$node" -lt 22 ]; then die "Node.js >= 22 is needed (found: ${node:-none}). prepare.sh installs the current LTS."; fi
   have curl || die "curl is needed: sudo apt-get install -y curl"
   if ! have docker || ! docker compose version >/dev/null 2>&1; then die "Docker with the compose plugin is needed. prepare.sh installs it."; fi
   if ! docker info >/dev/null 2>&1; then die "This user cannot talk to Docker. Log out and in again after prepare.sh, or: sudo usermod -aG docker $(id -un)"; fi
