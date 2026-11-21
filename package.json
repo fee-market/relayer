@@ -31,6 +31,8 @@
     "test:charge": "tsx tools/charge.test.ts",
     "sponsor:init": "tsx src/sponsor/init.ts",
     "sponsor:plans:configure": "tsx tools/configurePlans.ts",
+    "sponsor:serve": "bash scripts/serve-public.sh",
+    "sponsor:vps": "bash scripts/vps/setup.sh",
     "sponsor:doctor": "tsx src/sponsor/doctor.ts",
     "test:doctor": "tsx tools/doctor.test.ts",
     "check:framework": "tsx tools/frameworkConformance.ts",

@@ -27,9 +27,10 @@ Dev: `npm run dev` then `curl localhost:8787/health`.
 
 | Path | Command |
 |------|---------|
-| Ubuntu VPS | clone → `sudo bash scripts/vps/prepare.sh` → (as node user) `bash scripts/vps/setup.sh` → `bash scripts/vps/check.sh` |
+| Ubuntu VPS (full guided) | `sudo bash scripts/vps/prepare.sh` then `npm run sponsor:vps` |
+| Plans + HTTPS on this box | `npm run sponsor:plans:configure` (writes plans, syncs `.env`, can start **Caddy** via Docker) |
+| HTTPS only | `npm run sponsor:serve` (Caddy + relayer; not Apache/nginx) |
 | Cloudflare Tunnel | `bash scripts/setup-tunnel.sh relay.yourdomain.com` |
-| Docker | `docker compose up -d --build` (set `PUBLIC_DOMAIN` in `.env`) |
 
 ### Updating a live node
 
@@ -59,7 +60,9 @@ Copy [`.env.example`](.env.example) — every variable is documented there. Mini
 | Script | What it does |
 |--------|----------------|
 | `sponsor:init` | Write `.env`, generate relayer key |
-| `sponsor:plans:configure` | Interactive profile + plans → `sponsor.plans.json` |
+| `sponsor:plans:configure` | Profile + plans → `sponsor.plans.json`; syncs public URL; can start Caddy |
+| `sponsor:serve` | Start/rebuild public HTTPS (Caddy + relayer via Docker Compose) |
+| `sponsor:vps` | Full guided VPS setup (`scripts/vps/setup.sh`) |
 | `sponsor:onboard` | Register / reuse sponsor, publish metadata |
 | `sponsor:go` | List plans and start the node |
 | `sponsor:doctor` | Read-only readiness check |

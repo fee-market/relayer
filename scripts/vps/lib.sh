@@ -127,14 +127,17 @@ is_env_safe() { [[ $1 =~ $RE_ENV_SAFE ]]; }
 is_ipv4() { [[ $1 =~ $RE_IPV4 ]]; }
 is_username() { [[ $1 =~ $RE_USER ]]; }
 
-# Canonical public relay URL for a domain (wallets POST here).
-public_relay_url() { printf 'https://%s/relay' "$1"; }
+# Canonical public base URL for a domain. Wallets append /relay, /subscribe, /health themselves —
+# do NOT include /relay here or they hit /relay/relay.
+public_relay_url() { printf 'https://%s' "$1"; }
 
-# True when PUBLIC_RELAYER_URL matches PUBLIC_DOMAIN (with or without trailing /relay).
+# True when PUBLIC_RELAYER_URL matches PUBLIC_DOMAIN (strip a mistaken trailing /relay).
 url_matches_domain() {
   local url=$1 domain=$2
+  url=${url%/}
+  url=${url%/relay}
   case "$url" in
-    "https://$domain" | "https://$domain/" | "https://$domain/relay" | "https://$domain/relay/") return 0 ;;
+    "https://$domain" | "http://$domain") return 0 ;;
   esac
   return 1
 }
