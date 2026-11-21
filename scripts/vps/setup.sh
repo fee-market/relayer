@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Guided setup of a sponsor node on a prepared server. Run as the node user (not root), from the repository:
+# Guided setup of a sponsor node on a prepared server. Run as the node user (not root), from the repo root:
 #
-#   bash relayer/scripts/vps/setup.sh             # from nothing to "waiting for the curator"
-#   bash relayer/scripts/vps/setup.sh --go-live   # after the curator verified you: list plans, publish the endpoint
+#   bash scripts/vps/setup.sh             # from nothing to "waiting for the curator"
+#   bash scripts/vps/setup.sh --go-live   # after the curator verified you: list plans, publish the endpoint
 #
-# It asks for what only you know (domain, payout address, RPC URL, storage key), writes relayer/.env, shows the
+# It asks for what only you know (domain, payout address, RPC URL, storage key), writes .env, shows the
 # relayer address to fund, defines your plans, registers you on Polygon, starts the node and checks it answers.
-# Secrets are typed hidden, go only into relayer/.env (mode 600) and are never printed. The one step that sends a
+# Secrets are typed hidden, go only into .env (mode 600) and are never printed. The one step that sends a
 # transaction (the registration) shows a dry run first and waits for you to type "yes".
 # Running it again is safe: it keeps an existing .env and picks up where things stand.
+# Later upgrades: npm run update  (not bare git pull).
 set -euo pipefail
 # shellcheck source=lib.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -51,12 +52,13 @@ check_requirements() {
   have curl || die "curl is needed: sudo apt-get install -y curl"
   if ! have docker || ! docker compose version >/dev/null 2>&1; then die "Docker with the compose plugin is needed. prepare.sh installs it."; fi
   if ! docker info >/dev/null 2>&1; then die "This user cannot talk to Docker. Log out and in again after prepare.sh, or: sudo usermod -aG docker $(id -un)"; fi
-  [ -f "$DEPLOY_FILE" ] || die "deployments/137.json is missing: run this from a full clone of the repository."
+  [ -f "$RELAYER_DIR/package.json" ] || die "package.json missing: clone https://github.com/fee-market/relayer and run from that directory."
+  [ -f "$DEPLOY_FILE" ] || [ -f "$ENV_EXAMPLE" ] || die "deployments/137.json and .env.example are both missing: incomplete clone."
   ok "Node.js $(node -v), Docker $(docker --version | sed 's/^Docker version \([^,]*\).*/\1/'), compose $(docker compose version --short)"
 }
 
 install_packages() {
-  if [ -d node_modules ] && [ node_modules -nt package-lock.json ]; then
+  if [ -d node_modules ] && [ -f package-lock.json ] && [ node_modules -nt package-lock.json ]; then
     ok "Packages are installed"
   else
     note "Installing the node's packages (npm ci). This takes a minute."
@@ -65,15 +67,15 @@ install_packages() {
   fi
 }
 
-# Brings the contract addresses in .env in line with deployments/137.json. Asks before changing a filled-in value.
+# Brings the contract addresses in .env in line with deployments/137.json (falls back to .env.example).
 sync_addresses() {
   local pair var want got changed=""
   for pair in $ADDRESS_MAP; do
     var=${pair%%:*}
-    want=$(json_get "$DEPLOY_FILE" "${pair##*:}")
+    want=$(deploy_addr "${pair##*:}" "$var")
     got=$(get_env "$var")
     if [ -z "$want" ] || [ "$(lower "$got")" = "$(lower "$want")" ]; then continue; fi
-    if [ -n "$got" ] && ! confirm "$var is $got, but deployments/137.json says $want. Correct it?"; then continue; fi
+    if [ -n "$got" ] && ! confirm "$var is $got, but the Polygon defaults say $want. Correct it?"; then continue; fi
     set_env "$var" "$want"
     changed="$changed $var"
   done
@@ -81,7 +83,7 @@ sync_addresses() {
     set_env CHAIN_ID "$CHAIN_ID_DEC"
     changed="$changed CHAIN_ID"
   fi
-  if [ -n "$changed" ]; then ok "Set from deployments/137.json:$changed"; else ok "Contract addresses match deployments/137.json"; fi
+  if [ -n "$changed" ]; then ok "Set Polygon defaults:$changed"; else ok "Contract addresses match Polygon defaults"; fi
 }
 
 ask_domain() {
@@ -136,7 +138,7 @@ ask_rpc() {
 
 configure_env() {
   if [ -f "$ENV_FILE" ]; then
-    ok "relayer/.env exists and is kept as it is (it holds your relayer key)"
+    ok ".env exists and is kept as it is (it holds your relayer key)"
     note "To start over, move it away yourself first, with a backup of the key: mv .env .env.old"
     chmod 600 "$ENV_FILE"
     sync_addresses
@@ -144,12 +146,12 @@ configure_env() {
     if [ -z "$DOMAIN" ]; then
       ask_domain
       set_env PUBLIC_DOMAIN "$DOMAIN"
-      set_env PUBLIC_RELAYER_URL "https://$DOMAIN"
+      set_env PUBLIC_RELAYER_URL "$(public_relay_url "$DOMAIN")"
     fi
     return
   fi
 
-  say "A few questions. Nothing is sent anywhere; the answers go into relayer/.env on this server."
+  say "A few questions. Nothing is sent anywhere; the answers go into .env on this server."
   ask_domain
   ask_payout
   note "The RPC is how the node talks to Polygon. Use a paid plan (Alchemy, QuickNode, …); the URL contains your key."
@@ -176,19 +178,20 @@ configure_env() {
 
   # --yes: no questions from the tool itself, and it makes a new relayer key. The secrets are added below so they
   # never appear in a command line.
-  sponsor sponsor:init -- --yes --public-url "https://$DOMAIN" --payout "$PAYOUT" >/dev/null
-  [ -f "$ENV_FILE" ] || die "sponsor:init did not write relayer/.env"
+  sponsor sponsor:init -- --yes --public-url "$(public_relay_url "$DOMAIN")" --payout "$PAYOUT" >/dev/null
+  [ -f "$ENV_FILE" ] || die "sponsor:init did not write .env"
   chmod 600 "$ENV_FILE"
   set_env RPC_URL "$RPC"
   if [ -n "$RPC2" ]; then set_env RPC_URLS "$RPC2"; fi
   set_env PUBLIC_DOMAIN "$DOMAIN"
+  set_env PUBLIC_RELAYER_URL "$(public_relay_url "$DOMAIN")"
   if [ -n "$THIRDWEB" ]; then set_env THIRDWEB_SECRET_KEY "$THIRDWEB"; fi
   if [ -n "$WEBHOOK" ]; then set_env ALERT_WEBHOOK_URL "$WEBHOOK"; fi
   set_env CORS_ORIGINS "$CORS"
   set_env METRICS_TOKEN "$(random_hex 32)"
   set_env TRUST_PROXY 1 # Caddy is the one hop in front of the node
   unset RPC RPC2 THIRDWEB WEBHOOK
-  ok "Wrote relayer/.env (mode 600) with a new relayer key, a dashboard token and a metrics token"
+  ok "Wrote .env (mode 600) with a new relayer key, a dashboard token and a metrics token"
   sync_addresses
 
   say ""
@@ -196,7 +199,7 @@ configure_env() {
   note "MAX_GAS_WEI=$(get_env MAX_GAS_WEI)  (most one sponsored send may cost; 100000000000000000 is 0.1 POL)"
   note "MAX_GAS_UNITS=$(get_env MAX_GAS_UNITS)  MAX_FEE_PER_GAS_GWEI=$(get_env MAX_FEE_PER_GAS_GWEI)"
   note "MIN_RELAYER_BALANCE_WEI=$(get_env MIN_RELAYER_BALANCE_WEI)  (the node pauses below this; 300000000000000000 is 0.3 POL)"
-  note "Change them in relayer/.env once you know your plan prices (fee math in docs/sponsor-setup.md). 0 switches a limit off."
+  note "Change them in .env once you know your plan prices. 0 switches a limit off."
 }
 
 fund_relayer() {
@@ -208,7 +211,7 @@ fund_relayer() {
   say "Relayer address (this one pays the gas):"
   printf '\n     %s%s%s\n\n' "$B" "$RELAYER" "$N"
   note "Send it POL on Polygon: a few days of gas, not more. 2 POL is a reasonable start; the node pauses below 0.3."
-  note "Back up the relayer key now: it is the RELAYER_PRIVATE_KEY line in relayer/.env. Copy it offline, not into a chat."
+  note "Back up the relayer key now: it is the RELAYER_PRIVATE_KEY line in .env. Copy it offline, not into a chat."
   local bal a
   while true; do
     bal=$(relayer_balance_pol "$RELAYER")
@@ -231,9 +234,9 @@ configure_plans() {
     if ! confirm "Change them now?" n; then return; fi
     warn "Changing plans changes your metadata" "After the curator verified you, that sends you back to Pending"
   else
-    note "Next: your profile (name, region) and your plans (model, price, quota). Examples are in docs/sponsor-setup.md."
+    note "Next: your profile (name, region) and your plans (model, price, quota)."
   fi
-  note "It asks for the node's public URL too: press Enter to keep the one from the configuration step."
+  note "It asks for the node's public URL too: press Enter to keep $(get_env PUBLIC_RELAYER_URL)."
   sponsor sponsor:plans:configure || true
   if [ ! -f sponsor.plans.json ]; then
     warn "No sponsor.plans.json was written" "Run it again: npm run sponsor:plans:configure"
@@ -243,7 +246,7 @@ configure_plans() {
   local plan_url env_url
   plan_url=$(json_get sponsor.plans.json relayerEndpoint)
   env_url=$(get_env PUBLIC_RELAYER_URL)
-  if [ "${plan_url%/}" != "${env_url%/}" ]; then
+  if [ -n "$plan_url" ] && [ "${plan_url%/}" != "${env_url%/}" ]; then
     warn "The plan file publishes $plan_url, but this node is $env_url" "Wallets would be sent to the wrong address. Run this script again and change the plans"
   fi
 }
@@ -253,7 +256,7 @@ register() {
     note "Publishing your profile needs a storage key."
     ask_secret THIRDWEB "Thirdweb secret key (empty to stop here)"
     if [ -z "$THIRDWEB" ] || ! is_env_safe "$THIRDWEB"; then
-      warn "No storage key: the registration is skipped" "Add THIRDWEB_SECRET_KEY to relayer/.env and run this script again"
+      warn "No storage key: the registration is skipped" "Add THIRDWEB_SECRET_KEY to .env and run this script again"
       return 1
     fi
     set_env THIRDWEB_SECRET_KEY "$THIRDWEB"
@@ -284,7 +287,7 @@ register() {
 start_node() {
   note "Builds the image and starts two containers: the node (internal) and Caddy (ports 80 and 443, with the certificate)."
   if ! confirm "Start the node now?"; then
-    skip "Not started. Later: cd relayer && docker compose up -d --build"
+    skip "Not started. Later: docker compose up -d --build"
     return 1
   fi
   if ! docker compose up -d --build; then
@@ -325,9 +328,9 @@ handoff() {
   say "When you are verified:"
   printf '\n     bash scripts/vps/setup.sh --go-live\n\n'
   say "Any time:"
-  printf '\n     bash scripts/vps/check.sh        # the server and the node\n     npm run sponsor:doctor           # the on-chain side\n     docker compose logs -f relayer   # what the node is doing\n\n'
-  note "The dashboard is at https://$domain/admin/ ; its token is DASHBOARD_TOKEN in relayer/.env."
-  note "Then read docs/sponsor-vps-checklist.md section 7 (backups, uptime check, runbooks)."
+  printf '\n     bash scripts/vps/check.sh        # the server and the node\n     npm run sponsor:doctor           # the on-chain side\n     npm run update                   # pull + rebuild without lockfile fights\n     docker compose logs -f relayer   # what the node is doing\n\n'
+  note "The dashboard is at https://$domain/admin/ ; its token is DASHBOARD_TOKEN in .env."
+  note "Do not run bare git pull on this server — use npm run update."
 }
 
 # ---- After verification ----
@@ -336,7 +339,7 @@ go_live() {
   printf '%sfee.market sponsor node: go live%s\n' "$B" "$N"
   step "Requirements"
   check_requirements
-  [ -f "$ENV_FILE" ] || die "No relayer/.env: run setup.sh without --go-live first."
+  [ -f "$ENV_FILE" ] || die "No .env: run setup.sh without --go-live first."
 
   step "List your plans and (re)start the node"
   note "Lists the plans from sponsor.plans.json on Polygon (transactions from the relayer key), then starts the node."
@@ -354,11 +357,11 @@ go_live() {
   note "and its key should not be on this server."
   if confirm "Is the payout wallet a Safe?" y; then
     sponsor sponsor:endpoint -- --safe-batch endpoint.json
-    ok "Wrote relayer/endpoint.json"
+    ok "Wrote endpoint.json"
     note "Import it in the Safe's Transaction Builder and execute it with the owners."
   else
     say "  Set it from the payout wallet in the web app: https://app.fee.market/sponsor/service"
-    say "  URL to enter: https://$domain"
+    say "  URL to enter: $(public_relay_url "$domain")"
   fi
   say ""
   note "Check the result: npm run sponsor:doctor compares the on-chain URL with the one the node publishes."

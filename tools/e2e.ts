@@ -1,7 +1,7 @@
 /**
  * End-to-end local test: acts as the USER's wallet against a running sponsor node + forked anvil.
  *
- *   1. reads the addresses deployed by contracts/script/LocalSetup.s.sol
+ *   1. reads deployments/local.json (from a local FeeMarket contracts LocalSetup run)
  *   2. builds + signs an ERC-7710 delegation (ANY_DELEGATE, locked to the sponsor relayer)
  *   3. signs the EIP-7702 authorization (upgrades the user EOA to the DeleGator)
  *   4. POSTs to the sponsor node's /relay (the node pays gas and redeems; the batch's last call is the user's own chargeUsage)
@@ -9,7 +9,7 @@
  *
  *   npm run e2e
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
@@ -39,7 +39,13 @@ const USER_KEY = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab
 const user = privateKeyToAccount(USER_KEY);
 
 const here = dirname(fileURLToPath(import.meta.url));
-const dep = JSON.parse(readFileSync(join(here, "../../contracts/deployments/local.json"), "utf8"));
+const localDeploy = process.env.LOCAL_DEPLOYMENTS ?? join(here, "../deployments/local.json");
+if (!existsSync(localDeploy)) {
+  throw new Error(
+    `missing ${localDeploy}: run a local FeeMarket contracts LocalSetup and copy its deployments/local.json here (or set LOCAL_DEPLOYMENTS=…)`,
+  );
+}
+const dep = JSON.parse(readFileSync(localDeploy, "utf8"));
 
 const publicClient = createPublicClient({ transport: http(RPC_URL) });
 

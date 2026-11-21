@@ -22,7 +22,7 @@ const { validatePinnedDelegation } = await import("../src/services/batchValidati
 const { relayerAddress } = await import("../src/lib/clients.js");
 const { config } = await import("../src/config.js");
 
-const fixture = JSON.parse(readFileSync(new URL("../../fixtures/wallet-delegation-parity.json", import.meta.url), "utf8")) as {
+const fixture = JSON.parse(readFileSync(new URL("../fixtures/wallet-delegation-parity.json", import.meta.url), "utf8")) as {
   now: number; relayer: string; registry: string; sponsorId: number;
   cases: { name: string; expect: "accepted" | "rejected"; delegation: Record<string, unknown>; executionCallData: `0x${string}` }[];
 };

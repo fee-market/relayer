@@ -141,11 +141,12 @@ const set = (key, value) => {
   const re = new RegExp('^' + key + '=.*\$', 'm');
   t = re.test(t) ? t.replace(re, key + '=' + value) : t.trimEnd() + '\n' + key + '=' + value + '\n';
 };
-set('PUBLIC_RELAYER_URL', 'https://$HOSTNAME');
+set('PUBLIC_RELAYER_URL', 'https://$HOSTNAME/relay');
+set('PUBLIC_DOMAIN', '$HOSTNAME');
 // Every request arrives from cloudflared, so without this all users share ONE per-IP rate-limit bucket.
 set('CLIENT_IP_HEADER', 'cf-connecting-ip');
 fs.writeFileSync(p, t, { mode: 0o600 });
-console.log('✓ set PUBLIC_RELAYER_URL=https://$HOSTNAME and CLIENT_IP_HEADER=cf-connecting-ip in relayer/.env');
+console.log('✓ set PUBLIC_RELAYER_URL=https://$HOSTNAME/relay and CLIENT_IP_HEADER=cf-connecting-ip in .env');
 "
 
 echo ""

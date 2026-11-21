@@ -254,44 +254,40 @@ if have ss; then
 fi
 
 # ---- 7. Node configuration ----
-section "7. Node configuration (relayer/.env)"
+section "7. Node configuration (.env)"
 RELAYER=""
 if [ ! -f "$ENV_FILE" ]; then
-  skip "No relayer/.env yet: setup.sh writes it"
+  skip "No .env yet: setup.sh writes it"
 elif [ ! -r "$ENV_FILE" ]; then
-  skip "relayer/.env is not readable by $(id -un)"
+  skip ".env is not readable by $(id -un)"
 else
   MODE=$(file_mode "$ENV_FILE")
   if [ "$MODE" = 600 ] || [ "$MODE" = 400 ]; then
     ok ".env is private (mode $MODE, owner $(file_owner "$ENV_FILE"))"
   else
-    fail ".env has mode $MODE: other users on the server can read the relayer key" "chmod 600 relayer/.env"
+    fail ".env has mode $MODE: other users on the server can read the relayer key" "chmod 600 .env"
   fi
-  if have git && git -C "$REPO_DIR" ls-files --error-unmatch relayer/.env >/dev/null 2>&1; then
-    fail ".env is tracked by git" "git rm --cached relayer/.env, and treat the key in it as leaked"
+  if have git && git -C "$REPO_DIR" ls-files --error-unmatch .env >/dev/null 2>&1; then
+    fail ".env is tracked by git" "git rm --cached .env, and treat the key in it as leaked"
   fi
 
   if [ "$(env_get "$ENV_FILE" CHAIN_ID)" = "$CHAIN_ID_DEC" ]; then ok "CHAIN_ID is $CHAIN_ID_DEC (Polygon)"; else fail "CHAIN_ID is not $CHAIN_ID_DEC"; fi
 
-  if [ -f "$DEPLOY_FILE" ]; then
-    WRONG=""
-    for pair in $ADDRESS_MAP; do
-      var=${pair%%:*}
-      want=$(json_get "$DEPLOY_FILE" "${pair##*:}")
-      got=$(env_get "$ENV_FILE" "$var")
-      if [ -n "$want" ] && [ "$(lower "$got")" != "$(lower "$want")" ]; then
-        # the timelock is only watched for alerts; empty is allowed
-        if [ "$var" = UPGRADE_TIMELOCK ] && [ -z "$got" ]; then continue; fi
-        WRONG="$WRONG $var"
-      fi
-    done
-    if [ -z "$WRONG" ]; then
-      ok "Contract addresses match deployments/137.json"
-    else
-      fail "These addresses differ from deployments/137.json:$WRONG" "setup.sh offers to correct them"
+  WRONG=""
+  for pair in $ADDRESS_MAP; do
+    var=${pair%%:*}
+    want=$(deploy_addr "${pair##*:}" "$var")
+    got=$(env_get "$ENV_FILE" "$var")
+    if [ -n "$want" ] && [ "$(lower "$got")" != "$(lower "$want")" ]; then
+      # the timelock is only watched for alerts; empty is allowed
+      if [ "$var" = UPGRADE_TIMELOCK ] && [ -z "$got" ]; then continue; fi
+      WRONG="$WRONG $var"
     fi
+  done
+  if [ -z "$WRONG" ]; then
+    ok "Contract addresses match Polygon defaults"
   else
-    warn "deployments/137.json not found; contract addresses were not compared"
+    fail "These addresses differ from deployments/137.json (or .env.example):$WRONG" "setup.sh offers to correct them"
   fi
 
   RPC=$(env_get "$ENV_FILE" RPC_URL)
@@ -314,10 +310,10 @@ else
   ENV_DOMAIN=$(env_get "$ENV_FILE" PUBLIC_DOMAIN)
   if [ -z "$ENV_DOMAIN" ]; then
     fail "PUBLIC_DOMAIN is empty" "docker compose needs it for the certificate"
-  elif [ "$URL" = "https://$ENV_DOMAIN" ] || [ "$URL" = "https://$ENV_DOMAIN/" ]; then
-    ok "Public URL is https://$ENV_DOMAIN"
+  elif url_matches_domain "$URL" "$ENV_DOMAIN"; then
+    ok "Public URL matches $ENV_DOMAIN (${URL:-empty})"
   else
-    fail "PUBLIC_RELAYER_URL and PUBLIC_DOMAIN disagree" "PUBLIC_RELAYER_URL must be https://$ENV_DOMAIN"
+    fail "PUBLIC_RELAYER_URL and PUBLIC_DOMAIN disagree" "Expected $(public_relay_url "$ENV_DOMAIN") (or https://$ENV_DOMAIN)"
   fi
 
   SOURCE=$(env_get "$ENV_FILE" RELAYER_KEY_SOURCE)
@@ -327,7 +323,7 @@ else
       fail "RELAYER_PRIVATE_KEY is empty"
     else
       RELAYER=$(relayer_address)
-      warn "The relayer key is a raw key in .env${RELAYER:+ (address $RELAYER)}" "Fine to start with a small balance. Move to RELAYER_KEY_SOURCE=keystore later (docs/sponsor-setup.md)"
+      warn "The relayer key is a raw key in .env${RELAYER:+ (address $RELAYER)}" "Fine to start with a small balance. Move to RELAYER_KEY_SOURCE=keystore later"
     fi
   else
     ok "The relayer key is not a raw key in .env ($SOURCE)"
@@ -353,7 +349,7 @@ else
   if [ "$(env_get "$ENV_FILE" CORS_ORIGINS)" = "*" ]; then warn "CORS_ORIGINS is *" "List your web origins; the doctor refuses a published node with *"; fi
   for cap in MAX_GAS_WEI MAX_GAS_UNITS MAX_FEE_PER_GAS_GWEI MIN_RELAYER_BALANCE_WEI; do
     v=$(env_get "$ENV_FILE" "$cap")
-    if [ -z "$v" ] || [ "$v" = 0 ]; then warn "$cap is off" "Set it from the fee math in docs/sponsor-setup.md"; fi
+    if [ -z "$v" ] || [ "$v" = 0 ]; then warn "$cap is off" "Set a spend cap in .env before publishing"; fi
   done
   if [ -z "$(env_get "$ENV_FILE" THIRDWEB_SECRET_KEY)" ] && [ -z "$(env_get "$ENV_FILE" THIRDWEB_CLIENT_ID)" ] && [ "$(env_get "$ENV_FILE" METADATA_STORAGE)" != filone ]; then
     warn "No metadata storage key (THIRDWEB_SECRET_KEY)" "sponsor:onboard cannot publish your metadata without one"
@@ -398,7 +394,7 @@ else
     case "$STATE" in
       "running healthy" | running) ok "$svc is $STATE" ;;
       "running starting") warn "$svc is still starting" ;;
-      *) fail "$svc is ${STATE:-not running}" "cd relayer && docker compose logs --tail 50 $svc" ;;
+      *) fail "$svc is ${STATE:-not running}" "docker compose logs --tail 50 $svc" ;;
     esac
     if [ "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$ID" 2>/dev/null)" != unless-stopped ]; then
       warn "$svc does not restart on its own after a reboot"
@@ -417,7 +413,7 @@ if [ -n "$DOMAIN" ]; then
     200) ok "https://$DOMAIN/health answers and the node is ready" ;;
     503) warn "https://$DOMAIN/health answers, but the node is not ready" "$(sed -n 's/.*"problems"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*/\1/p' "$BODY" | cut -c1-200)" ;;
     000 | "") skip "https://$DOMAIN/health does not answer (not started, DNS, or no certificate yet)" ;;
-    *) fail "https://$DOMAIN/health answers with HTTP $CODE" "cd relayer && docker compose logs --tail 50" ;;
+    *) fail "https://$DOMAIN/health answers with HTTP $CODE" "docker compose logs --tail 50" ;;
   esac
   if [ -n "$REPORTED" ] && [ -n "$RELAYER" ]; then
     if [ "$(lower "$REPORTED")" = "$(lower "$RELAYER")" ]; then
@@ -441,7 +437,8 @@ fi
 # ---- Summary ----
 printf '\n%s%d passed, %d to look at, %d blocking%s\n' "$B" "$PASSES" "$WARNS" "$FAILS" "$N"
 if [ -f "$ENV_FILE" ] && [ -d "$RELAYER_DIR/node_modules" ]; then
-  note "For the on-chain side (registered, verified, plans): cd relayer && npm run sponsor:doctor"
+  note "For the on-chain side (registered, verified, plans): npm run sponsor:doctor"
 fi
+note "To upgrade later: npm run update   (not bare git pull)"
 if [ "$FAILS" -gt 0 ]; then exit 1; fi
 exit 0

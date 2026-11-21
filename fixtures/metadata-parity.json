@@ -1,0 +1,120 @@
+{
+  "input": {
+    "profile": {
+      "sponsorId": "7",
+      "name": "Parity Gas Co",
+      "region": "eu-west",
+      "relayerEndpoint": "https://relay.parity.example/relay",
+      "relayer": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      "payoutAddress": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "chainId": 137,
+      "feeMarketRegistry": "0x57e6742610229c7Ce09df3028471397DaaE6B9f4"
+    },
+    "plans": [
+      {
+        "name": "Bulk",
+        "region": "eu-west",
+        "supportedChains": [
+          137
+        ],
+        "relayerEndpoint": "https://relay.parity.example/relay",
+        "paymentToken": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+        "model": 1,
+        "priceBaseUnits": "10000000",
+        "quota": "1000",
+        "periodSeconds": "0",
+        "caveats": {
+          "restrictToRelayer": true,
+          "maxCalls": 1,
+          "exactBatch": true
+        }
+      },
+      {
+        "name": "Pay as you go",
+        "region": "eu-west",
+        "supportedChains": [
+          137
+        ],
+        "relayerEndpoint": "https://relay.parity.example/relay",
+        "paymentToken": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+        "model": 0,
+        "priceBaseUnits": "10000",
+        "quota": "0",
+        "periodSeconds": "0",
+        "caveats": {
+          "restrictToRelayer": true,
+          "maxCalls": 1
+        }
+      },
+      {
+        "name": "Monthly unlimited",
+        "region": "eu-west",
+        "supportedChains": [
+          137
+        ],
+        "relayerEndpoint": "https://relay.parity.example/relay",
+        "paymentToken": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+        "model": 2,
+        "priceBaseUnits": "25000000",
+        "quota": "0",
+        "periodSeconds": "2592000",
+        "caveats": {
+          "restrictToRelayer": true,
+          "maxCalls": 1,
+          "exactBatch": true,
+          "allowedTargets": [
+            "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+          ]
+        }
+      },
+      {
+        "name": "Capped subscription",
+        "region": "us-east",
+        "supportedChains": [
+          137,
+          1
+        ],
+        "relayerEndpoint": "https://relay.parity.example/relay",
+        "paymentToken": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+        "model": 2,
+        "priceBaseUnits": "1500000",
+        "quota": "50",
+        "periodSeconds": "86400",
+        "caveats": {
+          "restrictToRelayer": true,
+          "allowedSelectors": [
+            "0xa9059cbb"
+          ],
+          "spendCaps": [
+            {
+              "token": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+              "maxAmount": "5000000"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "caveatsHashes": [
+      "0xe709b1eae1f05b0a2f719dded85b2f16b9d4e09b8f90b3d9691c5610351957d8",
+      "0xdf41c8e5805f2165e2762871aec66af62688d86b3d3081f07c81740fc5a6a0ae",
+      "0x7a5f5cecb65740eef10c7d9b8e327fa65d192a4664da06d9ce0fbd01c58e9f0a",
+      "0x7bd88252e44d15ed57ddf85e1249889f495e15cf4582d6a57da588f4ad9d3803"
+    ],
+    "commitments": [
+      "0x9ba83960516596d977c02ba7d2a67c7da96d70f0112c3386a0f541e38d5304b6",
+      "0x407045814c3635cec413b3201da04841fc7c085b8c16e896ac895e782c8913ac",
+      "0x06d738a6d8ec30b0e9fc9e790f0ef40692713433b742640f28e3821e23d5caf0",
+      "0x27927798c651afbb07328a59c89cd97d557864f2815c4afaeace8db05c411ca6"
+    ],
+    "pricing": [
+      "1000 transactions for $10",
+      "$0.01 per transaction",
+      "$25 per 30 days (unlimited)",
+      "$1.5 per 1 days (up to 50 txns)"
+    ],
+    "serialized": "{\n  \"sponsorId\": \"7\",\n  \"name\": \"Parity Gas Co\",\n  \"region\": \"eu-west\",\n  \"relayerEndpoint\": \"https://relay.parity.example/relay\",\n  \"relayer\": \"0x70997970C51812dc3A010C7d01b50e0d17dc79C8\",\n  \"payoutAddress\": \"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC\",\n  \"chainId\": 137,\n  \"feeMarketRegistry\": \"0x57e6742610229c7Ce09df3028471397DaaE6B9f4\",\n  \"plans\": [\n    {\n      \"name\": \"Bulk\",\n      \"region\": \"eu-west\",\n      \"supportedChains\": [\n        137\n      ],\n      \"relayerEndpoint\": \"https://relay.parity.example/relay\",\n      \"pricing\": \"1000 transactions for $10\",\n      \"economics\": {\n        \"paymentToken\": \"0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359\",\n        \"model\": 1,\n        \"price\": \"10000000\",\n        \"quota\": \"1000\",\n        \"period\": \"0\"\n      },\n      \"caveats\": {\n        \"restrictToRelayer\": true,\n        \"maxCalls\": 1,\n        \"exactBatch\": true\n      },\n      \"caveatsHash\": \"0xe709b1eae1f05b0a2f719dded85b2f16b9d4e09b8f90b3d9691c5610351957d8\"\n    },\n    {\n      \"name\": \"Pay as you go\",\n      \"region\": \"eu-west\",\n      \"supportedChains\": [\n        137\n      ],\n      \"relayerEndpoint\": \"https://relay.parity.example/relay\",\n      \"pricing\": \"$0.01 per transaction\",\n      \"economics\": {\n        \"paymentToken\": \"0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359\",\n        \"model\": 0,\n        \"price\": \"10000\",\n        \"quota\": \"0\",\n        \"period\": \"0\"\n      },\n      \"caveats\": {\n        \"restrictToRelayer\": true,\n        \"maxCalls\": 1\n      },\n      \"caveatsHash\": \"0xdf41c8e5805f2165e2762871aec66af62688d86b3d3081f07c81740fc5a6a0ae\"\n    },\n    {\n      \"name\": \"Monthly unlimited\",\n      \"region\": \"eu-west\",\n      \"supportedChains\": [\n        137\n      ],\n      \"relayerEndpoint\": \"https://relay.parity.example/relay\",\n      \"pricing\": \"$25 per 30 days (unlimited)\",\n      \"economics\": {\n        \"paymentToken\": \"0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359\",\n        \"model\": 2,\n        \"price\": \"25000000\",\n        \"quota\": \"0\",\n        \"period\": \"2592000\"\n      },\n      \"caveats\": {\n        \"restrictToRelayer\": true,\n        \"maxCalls\": 1,\n        \"exactBatch\": true,\n        \"allowedTargets\": [\n          \"0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359\"\n        ]\n      },\n      \"caveatsHash\": \"0x7a5f5cecb65740eef10c7d9b8e327fa65d192a4664da06d9ce0fbd01c58e9f0a\"\n    },\n    {\n      \"name\": \"Capped subscription\",\n      \"region\": \"us-east\",\n      \"supportedChains\": [\n        137,\n        1\n      ],\n      \"relayerEndpoint\": \"https://relay.parity.example/relay\",\n      \"pricing\": \"$1.5 per 1 days (up to 50 txns)\",\n      \"economics\": {\n        \"paymentToken\": \"0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359\",\n        \"model\": 2,\n        \"price\": \"1500000\",\n        \"quota\": \"50\",\n        \"period\": \"86400\"\n      },\n      \"caveats\": {\n        \"restrictToRelayer\": true,\n        \"allowedSelectors\": [\n          \"0xa9059cbb\"\n        ],\n        \"spendCaps\": [\n          {\n            \"token\": \"0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359\",\n            \"maxAmount\": \"5000000\"\n          }\n        ]\n      },\n      \"caveatsHash\": \"0x7bd88252e44d15ed57ddf85e1249889f495e15cf4582d6a57da588f4ad9d3803\"\n    }\n  ]\n}",
+    "hash": "0x0704db2cbd16b56ca2d5eebba673ee5de5035549aedc5c03b6fa38375847dd79"
+  }
+}

@@ -31,6 +31,9 @@ secrets/
 # Sponsor local config (CLI-written; never commit)
 sponsor.plans.json
 
+# Local anvil / forge deploy output (e2e); keep deployments/137.json
+deployments/local.json
+
 # Runtime data & local state
 data/
 *.log

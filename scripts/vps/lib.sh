@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Shared helpers for the VPS scripts (check.sh, prepare.sh, setup.sh). Sourced, never run.
-# Written for the bash on Ubuntu 22.04 and later; avoids anything newer than bash 3.2 so it can be tried elsewhere.
+# Written for bash on Ubuntu 22.04+; this repo is the standalone fee-market/relayer checkout.
 
 VPS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Repo root = this package (scripts/vps → ../..)
 RELAYER_DIR="$(cd "$VPS_DIR/../.." && pwd)"
-REPO_DIR="$(cd "$RELAYER_DIR/.." && pwd)"
+REPO_DIR="$RELAYER_DIR"
 ENV_FILE="$RELAYER_DIR/.env"
-DEPLOY_FILE="$REPO_DIR/deployments/137.json"
+ENV_EXAMPLE="$RELAYER_DIR/.env.example"
+DEPLOY_FILE="$RELAYER_DIR/deployments/137.json"
 CHAIN_ID_DEC=137
 CHAIN_ID_HEX=0x89
 
@@ -110,7 +112,7 @@ confirm() {
 
 # ---- Validation ----
 
-RE_ADDRESS='^0x[0-9a-fA-F]{40}$'
+RE_ADDRESS='^0x[a-fA-F0-9]{40}$'
 RE_DOMAIN='^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'
 # No spaces, quotes, $ or #: the value goes into an env file that both dotenv and docker compose read.
 RE_HTTPS_URL='^https://[A-Za-z0-9._~:/?@!&=+,%-]+$'
@@ -124,6 +126,18 @@ is_https_url() { [[ $1 =~ $RE_HTTPS_URL ]]; }
 is_env_safe() { [[ $1 =~ $RE_ENV_SAFE ]]; }
 is_ipv4() { [[ $1 =~ $RE_IPV4 ]]; }
 is_username() { [[ $1 =~ $RE_USER ]]; }
+
+# Canonical public relay URL for a domain (wallets POST here).
+public_relay_url() { printf 'https://%s/relay' "$1"; }
+
+# True when PUBLIC_RELAYER_URL matches PUBLIC_DOMAIN (with or without trailing /relay).
+url_matches_domain() {
+  local url=$1 domain=$2
+  case "$url" in
+    "https://$domain" | "https://$domain/" | "https://$domain/relay" | "https://$domain/relay/") return 0 ;;
+  esac
+  return 1
+}
 
 # ---- Env file ----
 
@@ -154,9 +168,19 @@ env_set() {
 file_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null; }
 file_owner() { stat -c '%U' "$1" 2>/dev/null || stat -f '%Su' "$1" 2>/dev/null; }
 
-# json_get FILE KEY: a string value from a flat JSON file (deployments/137.json), without needing Node.
+# json_get FILE KEY: a string value from a flat (or lightly nested) JSON file, without needing Node.
 json_get() {
   sed -n 's/.*"'"$2"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -n 1
+}
+
+# Address default: deployments/137.json, else .env.example.
+deploy_addr() {
+  local key=$1 env_key=$2 want
+  want=$(json_get "$DEPLOY_FILE" "$key")
+  if [ -z "$want" ] && [ -f "$ENV_EXAMPLE" ]; then
+    want=$(env_get "$ENV_EXAMPLE" "$env_key")
+  fi
+  printf '%s' "$want"
 }
 
 random_hex() { # bytes

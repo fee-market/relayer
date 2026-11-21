@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Prepares a fresh Ubuntu VPS for a sponsor node. Run once, as root, from a clone of this repository:
 #
-#   sudo bash relayer/scripts/vps/prepare.sh
-#   sudo bash relayer/scripts/vps/prepare.sh --dry-run   # asks the same questions, prints the commands, changes nothing
+#   sudo bash scripts/vps/prepare.sh
+#   sudo bash scripts/vps/prepare.sh --dry-run   # asks the same questions, prints the commands, changes nothing
 #
 # It walks through nine steps and asks before each one: a normal user for the node, SSH with keys only, the
 # firewall (SSH, 80 and 443), automatic security updates, clock sync, a swap file on small servers, Docker,
@@ -68,7 +68,7 @@ printf '%sfee.market sponsor node: server preparation%s\n' "$B" "$N"
 if [ "$DRY" -eq 1 ]; then
   note "Dry run: commands are printed, nothing is changed."
 else
-  if [ "$(id -u)" -ne 0 ]; then die "Run this with sudo: sudo bash relayer/scripts/vps/prepare.sh"; fi
+  if [ "$(id -u)" -ne 0 ]; then die "Run this with sudo: sudo bash scripts/vps/prepare.sh"; fi
   OS_ID=""
   if [ -r /etc/os-release ]; then OS_ID=$(. /etc/os-release && printf '%s' "${ID:-}"); fi
   if [ "$OS_ID" != ubuntu ]; then die "This script is for Ubuntu (found: ${OS_ID:-unknown}). Nothing was changed."; fi
@@ -190,7 +190,7 @@ elif ! grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/' /etc/
 elif confirm "Turn off password login and root login over SSH?"; then
   # The first value sshd reads wins, so the file name sorts before cloud-init's 50-cloud-init.conf.
   write_file "$HARDEN_FILE" 644 <<'EOF'
-# Written by fee.market relayer/scripts/vps/prepare.sh. Delete this file and reload ssh to undo.
+# Written by fee.market scripts/vps/prepare.sh. Delete this file and reload ssh to undo.
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin no
@@ -364,7 +364,8 @@ OWNER=$(file_owner "$REPO_DIR")
 if [ "$OWNER" = "$NODE_USER" ]; then
   ok "$REPO_DIR already belongs to $NODE_USER"
 else
-  TARGET="$NODE_HOME/$(basename "$REPO_DIR")"
+  # Prefer ~/relayer under the node user (matches the public clone path).
+  TARGET="$NODE_HOME/relayer"
   if [ -e "$TARGET" ]; then
     ok "$TARGET exists; using that copy"
   elif confirm "Copy this repository to $TARGET for $NODE_USER?"; then
@@ -373,6 +374,7 @@ else
     ok "Copied to $TARGET"
   else
     warn "The repository still belongs to ${OWNER:-another user}" "$NODE_USER needs its own copy to run the node"
+    TARGET=$REPO_DIR
   fi
 fi
 
@@ -384,7 +386,8 @@ if [ "$DRY" -eq 1 ]; then
 fi
 say "Next, as $NODE_USER (a fresh login, so the docker group applies):"
 printf '\n     ssh -p %s %s@%s\n' "$SSH_PORT" "$NODE_USER" "$(public_ipv4 || true)"
-printf '     cd %s/relayer\n' "$TARGET"
+printf '     cd %s\n' "$TARGET"
 printf '     bash scripts/vps/check.sh --domain relay.example.com   # what is still missing\n'
 printf '     bash scripts/vps/setup.sh                              # the guided node setup\n\n'
 note "Before setup.sh: point the A record of your domain at this server, and have your RPC URL and payout address ready."
+note "Later upgrades: cd $TARGET && npm run update"

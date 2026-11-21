@@ -27,7 +27,7 @@ Dev: `npm run dev` then `curl localhost:8787/health`.
 
 | Path | Command |
 |------|---------|
-| Ubuntu VPS | `sudo bash scripts/vps/prepare.sh` → `bash scripts/vps/setup.sh` → `bash scripts/vps/check.sh` |
+| Ubuntu VPS | clone → `sudo bash scripts/vps/prepare.sh` → (as node user) `bash scripts/vps/setup.sh` → `bash scripts/vps/check.sh` |
 | Cloudflare Tunnel | `bash scripts/setup-tunnel.sh relay.yourdomain.com` |
 | Docker | `docker compose up -d --build` (set `PUBLIC_DOMAIN` in `.env`) |
 

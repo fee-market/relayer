@@ -6,10 +6,10 @@
  *   npm run sponsor:metadata:publish  # upload AND commit on-chain in one step (the common case)
  *   (internal) publishMetadata.ts hash # print the content hash only; used by sponsor:onboard
  *
- * Edit src/sponsor/plans.ts (SPONSOR_PROFILE, SPONSOR_PLANS) to change what gets published.
+ * Prefer `npm run sponsor:plans:configure` (sponsor.plans.json); else edit src/sponsor/plans.ts.
  *
  * Committing a different hash for a VERIFIED sponsor sends it back to PENDING until the curator
- * re-verifies (same hash at a new URI does not). See docs/audit/AUDIT-REPORT.md (M-05).
+ * re-verifies (same hash at a new URI does not).
  */
 import type { Hex } from "viem";
 import { commitmentOfRow } from "./listing.js";

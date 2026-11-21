@@ -1,7 +1,7 @@
 /**
- * Regenerates fixtures/metadata-parity.json from THIS (relayer) implementation, which is the source of truth.
+ * Regenerates fixtures/metadata-parity.json from this relayer implementation (source of truth for hashing).
  *   npx tsx tools/genParityFixture.ts
- * The web app's port (web/lib/metadata.ts) must reproduce every `expected` value exactly.
+ * Marketplace clients that publish/verify metadata must reproduce every `expected` value exactly.
  */
 import { writeFileSync } from "node:fs";
 
@@ -15,5 +15,5 @@ process.env.REDEEMER_RESTRICTION_ENFORCER ??= "0x5C75d7ee6d3d27634bec15e96538e79
 
 const { fixtureInput, computeParity } = await import("./parityFixture.js");
 const out = { input: fixtureInput, expected: await computeParity(fixtureInput) };
-writeFileSync(new URL("../../fixtures/metadata-parity.json", import.meta.url), JSON.stringify(out, null, 2) + "\n");
+writeFileSync(new URL("../fixtures/metadata-parity.json", import.meta.url), JSON.stringify(out, null, 2) + "\n");
 console.log("wrote fixtures/metadata-parity.json");

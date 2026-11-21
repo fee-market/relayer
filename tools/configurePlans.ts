@@ -1,5 +1,5 @@
 /**
- * Interactive builder for relayer/sponsor.plans.json — define your profile and plans without
+ * Interactive builder for sponsor.plans.json — define your profile and plans without
  * touching plans.ts. Run before `sponsor:onboard`/`sponsor:go`; those (via plans.ts) pick this file
  * up automatically once it exists.
  *

@@ -1,5 +1,5 @@
 /**
- * Writes relayer/.env for a new sponsor node. Never imports config (it must run before a .env exists).
+ * Writes .env for a new sponsor node. Never imports config (it must run before a .env exists).
  *
  *   npm run sponsor:init                 # interactive
  *   npm run sponsor:init -- --yes        # accept defaults, generate a new relayer key and dashboard token
@@ -26,7 +26,7 @@ const TEMPLATE = new URL("../../.env.example", import.meta.url);
 
 async function main() {
   if (existsSync(ENV_PATH) && !flag("force")) {
-    console.error("relayer/.env already exists; refusing to overwrite it (use --force to replace).");
+    console.error(".env already exists; refusing to overwrite it (use --force to replace).");
     process.exit(1);
   }
   const yes = flag("yes");
@@ -68,7 +68,7 @@ async function main() {
   rl.close();
 
   writeFileSync(ENV_PATH, text, { mode: 0o600 });
-  console.log(`\n✓ wrote relayer/.env (mode 600)`);
+  console.log(`\n✓ wrote .env (mode 600)`);
   console.log(`  relayer address (fund this with POL for gas): ${relayer}`);
   console.log(`  payout address: ${getAddress(payout)}${getAddress(payout) === relayer ? "  (same as relayer: fine for tests, use a cold wallet in production)" : ""}`);
   console.log(`  dashboard token: saved in .env as DASHBOARD_TOKEN`);

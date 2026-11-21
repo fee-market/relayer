@@ -36,9 +36,9 @@ function test(name: string, fn: () => void) {
 
 const sample = () => JSON.parse(serializeMetadata(buildMetadata()));
 
-const parityFixture = JSON.parse(readFileSync(new URL("../../fixtures/metadata-parity.json", import.meta.url), "utf8"));
+const parityFixture = JSON.parse(readFileSync(new URL("../fixtures/metadata-parity.json", import.meta.url), "utf8"));
 const parityActual = await computeParity(parityFixture.input);
-test("the committed parity fixture still matches what this relayer computes (web/lib/metadata.ts must match too)", () => {
+test("the committed parity fixture still matches what this relayer computes (marketplace clients must match too)", () => {
   assert.deepEqual(parityActual, parityFixture.expected, "fixture is stale: run `npx tsx tools/genParityFixture.ts` and commit it");
 });
 
@@ -143,7 +143,7 @@ test("schema rejects an empty name and a non-numeric sponsorId", () => {
 });
 
 test("the plan commitments published with the metadata are the ones the registry checks (CT-04)", () => {
-  const fx = JSON.parse(readFileSync(new URL("../../fixtures/metadata-parity.json", import.meta.url), "utf8"));
+  const fx = JSON.parse(readFileSync(new URL("../fixtures/metadata-parity.json", import.meta.url), "utf8"));
   const rows = buildMetadata().plans;
   assert.ok(rows.length > 0);
   for (const row of rows) {
