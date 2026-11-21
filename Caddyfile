@@ -1,0 +1,8 @@
+# Automatic HTTPS (Let's Encrypt) for the sponsor node.
+{$PUBLIC_DOMAIN} {
+	encode zstd gzip
+	request_body {
+		max_size 512KB
+	}
+	reverse_proxy relayer:8787
+}

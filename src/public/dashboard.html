@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>fee.market · sponsor node</title>
+<style>
+  :root { --bg:#0b0b0f; --card:#13131a; --line:#23232d; --txt:#e8e8ef; --dim:#8a8a99; --ok:#34d399; --bad:#f87171; --warn:#fbbf24; --accent:#6366f1; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  header { display:flex; align-items:center; justify-content:space-between; padding:16px 24px; border-bottom:1px solid var(--line); }
+  h1 { font-size:16px; margin:0; font-weight:700; }
+  .wrap { padding:24px; max-width:1100px; margin:0 auto; }
+  .gate { max-width:380px; margin:80px auto; }
+  input { width:100%; background:var(--card); border:1px solid var(--line); color:var(--txt); border-radius:8px; padding:10px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 14px; font-weight:600; cursor:pointer; }
+  button.ghost { background:var(--card); border:1px solid var(--line); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  .card .label { color:var(--dim); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  .card .value { font-size:20px; font-weight:700; margin-top:4px; word-break:break-all; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:600; }
+  .pill.VERIFIED { background:rgba(52,211,153,.15); color:var(--ok); }
+  .pill.PENDING,.pill.UNVERIFIED { background:rgba(251,191,36,.15); color:var(--warn); }
+  .pill.REVOKED,.pill.unknown { background:rgba(248,113,113,.15); color:var(--bad); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { color:var(--dim); font-weight:600; font-size:11px; text-transform:uppercase; }
+  td.mono,.mono { font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+  .o-success { color:var(--ok); } .o-rejected { color:var(--warn); } .o-reverted,.o-error { color:var(--bad); }
+  .row { display:flex; gap:8px; align-items:center; }
+  .muted { color:var(--dim); }
+  a { color:var(--accent); text-decoration:none; }
+</style>
+</head>
+<body>
+<div id="gate" class="gate" style="display:none">
+  <div class="card">
+    <h1 style="margin-bottom:12px">Sponsor dashboard</h1>
+    <p class="muted" style="margin-top:0">Enter your <code>DASHBOARD_TOKEN</code> to view node stats &amp; logs.</p>
+    <input id="token" type="password" placeholder="Bearer token" />
+    <button style="margin-top:10px;width:100%" onclick="login()">Unlock</button>
+    <p id="err" class="o-reverted" style="min-height:18px"></p>
+  </div>
+</div>
+
+<div id="app" style="display:none">
+  <header>
+    <h1>fee.market · sponsor node</h1>
+    <div class="row">
+      <span id="autorefresh" class="muted">auto-refresh 5s</span>
+      <button class="ghost" onclick="refresh()">Refresh</button>
+      <button class="ghost" onclick="logout()">Lock</button>
+    </div>
+  </header>
+  <div class="wrap">
+    <div class="grid" id="cards"></div>
+    <div class="row" style="justify-content:space-between;margin-bottom:8px">
+      <h1 style="font-size:14px">Relay log</h1>
+      <select id="filter" onchange="refresh()" style="background:var(--card);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px">
+        <option value="">all</option><option>success</option><option>rejected</option><option>reverted</option><option>error</option>
+      </select>
+    </div>
+    <div class="card" style="padding:0;overflow:auto">
+      <table>
+        <thead><tr><th>time</th><th>outcome</th><th>sub</th><th>delegator</th><th>redeem tx</th><th>gas (wei)</th><th>reason</th></tr></thead>
+        <tbody id="logs"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const KEY = "feemarket.dashboard.token";
+let token = localStorage.getItem(KEY) || "";
+let timer = null;
+
+function show(view){ document.getElementById("gate").style.display = view==="gate"?"block":"none"; document.getElementById("app").style.display = view==="app"?"block":"none"; }
+function login(){ token = document.getElementById("token").value.trim(); start(); }
+function logout(){ localStorage.removeItem(KEY); token=""; clearInterval(timer); show("gate"); }
+
+async function api(path){
+  const res = await fetch(path, { headers: { Authorization: "Bearer " + token } });
+  if (res.status === 401) throw new Error("unauthorized");
+  if (res.status === 503) throw new Error("dashboard disabled on the node (set DASHBOARD_TOKEN)");
+  return res.json();
+}
+
+function fmtWei(wei){ if(wei==null) return "—"; const n=Number(wei)/1e18; return n>0 && n<0.0001 ? n.toExponential(2) : n.toFixed(6); }
+function short(a){ return a ? a.slice(0,6)+"…"+a.slice(-4) : "—"; }
+function ago(ts){ const s=Math.floor((Date.now()-ts)/1000); return s<60?s+"s":Math.floor(s/60)+"m"; }
+
+async function refresh(){
+  try {
+    const s = await api("/admin/stats");
+    const c = s.counters, n = s.node, o = s.onchain;
+    document.getElementById("cards").innerHTML = `
+      ${card("Status", '<span class="pill '+o.status+'">'+o.status+'</span>')}
+      ${card("Relayer balance", fmtWei(n.relayerBalanceWei)+' <span class="muted">native</span>')}
+      ${card("Claimable earnings", (Number(o.claimableEarnings)/1e6).toFixed(2)+' <span class="muted">USDC</span>')}
+      ${card("Relayed (ok)", c.success+' <span class="muted">/ '+c.total+'</span>')}
+      ${card("Success rate", (c.successRate*100).toFixed(1)+'%')}
+      ${card("Gas spent", fmtWei(c.totalGasUsedWei)+' <span class="muted">native</span>')}
+      ${card("Rejected / reverted", c.rejected+' / '+(c.reverted+c.error))}
+      ${card("Uptime", Math.floor(c.uptimeSec/3600)+'h '+Math.floor((c.uptimeSec%3600)/60)+'m')}
+      ${card("Relayer", '<span class="mono">'+short(n.relayer)+'</span>')}
+    `;
+    const f = document.getElementById("filter").value;
+    const l = await api("/admin/logs?limit=200" + (f?("&outcome="+f):""));
+    document.getElementById("logs").innerHTML = l.logs.map(row => `
+      <tr>
+        <td class="muted">${ago(row.ts)} ago</td>
+        <td class="o-${row.outcome}">${row.outcome}</td>
+        <td>${row.subscriptionId ?? "—"}</td>
+        <td class="mono">${short(row.delegator)}</td>
+        <td class="mono">${row.redeemTx ? short(row.redeemTx) : "—"}</td>
+        <td class="mono">${row.gasUsedWei ?? "—"}</td>
+        <td class="muted">${row.reason ?? ""}</td>
+      </tr>`).join("") || `<tr><td colspan="7" class="muted" style="padding:16px">No relays yet.</td></tr>`;
+  } catch(e){
+    if(String(e.message).includes("unauthorized")){ logout(); document.getElementById("err").textContent="Invalid token"; }
+    else console.error(e);
+  }
+}
+function card(label,value){ return `<div class="card"><div class="label">${label}</div><div class="value">${value}</div></div>`; }
+
+async function start(){
+  if(!token){ show("gate"); return; }
+  try { await api("/admin/stats"); }
+  catch(e){ show("gate"); document.getElementById("err").textContent = e.message; return; }
+  localStorage.setItem(KEY, token);
+  show("app"); refresh();
+  clearInterval(timer); timer = setInterval(refresh, 5000);
+}
+start();
+</script>
+</body>
+</html>

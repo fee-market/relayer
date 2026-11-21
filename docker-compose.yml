@@ -1,0 +1,48 @@
+# Sponsor node + automatic HTTPS.
+#
+#   cp .env.example .env   (or `npm run sponsor:init`), set PUBLIC_DOMAIN to a domain pointing at this host
+#   docker compose up -d --build
+#
+# Only Caddy publishes ports (80/443). The node itself is reachable from Caddy over the internal network.
+services:
+  relayer:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TRUST_PROXY: "1" # one hop (Caddy) so rate limits see real client IPs
+      STATE_DIR: /app/data # transactions in flight + dashboard history survive restarts (see the volume below)
+    volumes:
+      - relayer_data:/app/data
+    stop_grace_period: 30s # a little longer than DRAIN_MS (20s): the node finishes running requests on SIGTERM
+    expose:
+      - "8787"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      relayer:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN to the domain that points at this host}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  relayer_data:
+  caddy_data:
+  caddy_config:
