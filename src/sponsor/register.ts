@@ -16,11 +16,13 @@ import { config } from "../config.js";
 import { feeMarketRegistryAbi } from "../abi.js";
 import { account, publicClient, relayerAddress, sendTransactionSafe } from "../lib/clients.js";
 import { generateListing } from "./listing.js";
+import { isPlaceholderUri } from "./flow.js";
 import { SPONSOR_PLANS as PLANS } from "./plans.js";
 
 // Optional at registration: the metadata embeds the sponsorId, which only exists afterwards, so it is
 // normally committed right after with `npm run sponsor:metadata:publish`.
-const METADATA_URI = process.env.SPONSOR_METADATA_URI ?? "";
+// An old .env copied from the template still carries ipfs://<pin-your-metadata.json>; that is not a URI to put on chain.
+const METADATA_URI = isPlaceholderUri(process.env.SPONSOR_METADATA_URI ?? "") ? "" : (process.env.SPONSOR_METADATA_URI ?? "");
 const METADATA_HASH = (process.env.SPONSOR_METADATA_HASH ?? "0x" + "00".repeat(32)) as `0x${string}`;
 
 // Where earnings are paid and who may withdraw / rotate keys. Use a separate cold address in production;

@@ -16,7 +16,7 @@ const fromConfigFile = planConfigExists() ? loadPlanConfig() : null;
 export const SPONSOR_PROFILE = fromConfigFile?.profile ?? {
   name: process.env.SPONSOR_NAME ?? "My Gas Co",
   region: process.env.SPONSOR_REGION ?? "eu-west",
-  relayerEndpoint: process.env.PUBLIC_RELAYER_URL ?? "https://relay.example/relay",
+  relayerEndpoint: process.env.PUBLIC_RELAYER_URL ?? "https://relay.example.com",
 };
 
 export const SPONSOR_PLANS: SponsorRequirements[] = fromConfigFile?.plans ?? [

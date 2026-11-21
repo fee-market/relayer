@@ -371,7 +371,16 @@ else
       ok "The relayer holds $BAL POL"
     fi
   fi
-  if [ -f "$RELAYER_DIR/sponsor.plans.json" ]; then ok "Plans are defined (sponsor.plans.json)"; else warn "No sponsor.plans.json yet" "npm run sponsor:plans:configure"; fi
+  if [ -f "$RELAYER_DIR/sponsor.plans.json" ]; then
+    ok "Plans are defined (sponsor.plans.json)"
+    # The URL in the plan file is the one that gets published in the metadata; it must be this node's address.
+    PLAN_URL=$(json_get "$RELAYER_DIR/sponsor.plans.json" relayerEndpoint)
+    if [ -n "$PLAN_URL" ] && [ "${PLAN_URL%/}" != "${URL%/}" ]; then
+      fail "sponsor.plans.json publishes $PLAN_URL, but PUBLIC_RELAYER_URL is ${URL:-empty}" "npm run sponsor:plans:configure, and give it this node's URL"
+    fi
+  else
+    warn "No sponsor.plans.json yet" "npm run sponsor:plans:configure"
+  fi
 fi
 
 # ---- 8. The running node ----

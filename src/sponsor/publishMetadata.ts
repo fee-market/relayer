@@ -14,9 +14,24 @@
 import type { Hex } from "viem";
 import { commitmentOfRow } from "./listing.js";
 import { buildMetadata, metadataHashOf, serializeMetadata, setMetadata, uploadMetadata, validateMetadata } from "./metadata.js";
+import { publishedUrlProblem } from "./flow.js";
+
+/** The metadata this node would publish, refused when its relay URL is a placeholder or one the wallet cannot use. */
+function buildChecked() {
+  const metadata = buildMetadata();
+  for (const url of new Set<string>([metadata.relayerEndpoint, ...metadata.plans.map((p) => String(p.relayerEndpoint))])) {
+    const problem = publishedUrlProblem(url);
+    if (problem) {
+      throw new Error(
+        `${problem}. Set your real address with \`npm run sponsor:plans:configure\` (or PUBLIC_RELAYER_URL in .env when there is no sponsor.plans.json).`,
+      );
+    }
+  }
+  return metadata;
+}
 
 async function prepare() {
-  const metadata = await validateMetadata(buildMetadata());
+  const metadata = await validateMetadata(buildChecked());
   const body = serializeMetadata(metadata);
   const hash = metadataHashOf(body);
   console.log(body);
@@ -58,7 +73,7 @@ async function publish() {
 
 /** Print only `HASH 0x…` of the metadata that would be published (no upload, no tx); used by sponsor:onboard. */
 async function hashOnly() {
-  const metadata = await validateMetadata(buildMetadata());
+  const metadata = await validateMetadata(buildChecked());
   console.log(`HASH ${metadataHashOf(serializeMetadata(metadata))}`);
 }
 

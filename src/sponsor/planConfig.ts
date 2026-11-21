@@ -53,7 +53,8 @@ export function loadPlanConfig(path: URL = PLAN_CONFIG_PATH): { profile: PlanCon
   };
 
   const plans: SponsorRequirements[] = raw.plans.map((p, i) => {
-    if (!MODEL[p.model]) throw new Error(`sponsor.plans.json: plans[${i}].model must be one of PER_TXN, BULK, SUBSCRIPTION`);
+    // `in`, not truthiness: PER_TXN is 0 in the enum, and a truthiness test refused every per-transaction plan.
+    if (!(p.model in MODEL)) throw new Error(`sponsor.plans.json: plans[${i}].model must be one of PER_TXN, BULK, SUBSCRIPTION`);
     const caveats: CaveatPolicy = {
       restrictToRelayer: p.caveats.restrictToRelayer,
       ...(p.caveats.maxCalls !== undefined ? { maxCalls: p.caveats.maxCalls } : {}),

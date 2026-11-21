@@ -233,8 +233,19 @@ configure_plans() {
   else
     note "Next: your profile (name, region) and your plans (model, price, quota). Examples are in docs/sponsor-setup.md."
   fi
+  note "It asks for the node's public URL too: press Enter to keep the one from the configuration step."
   sponsor sponsor:plans:configure || true
-  if [ -f sponsor.plans.json ]; then ok "Plans saved"; else warn "No sponsor.plans.json was written" "Run it again: npm run sponsor:plans:configure"; fi
+  if [ ! -f sponsor.plans.json ]; then
+    warn "No sponsor.plans.json was written" "Run it again: npm run sponsor:plans:configure"
+    return
+  fi
+  ok "Plans saved"
+  local plan_url env_url
+  plan_url=$(json_get sponsor.plans.json relayerEndpoint)
+  env_url=$(get_env PUBLIC_RELAYER_URL)
+  if [ "${plan_url%/}" != "${env_url%/}" ]; then
+    warn "The plan file publishes $plan_url, but this node is $env_url" "Wallets would be sent to the wrong address. Run this script again and change the plans"
+  fi
 }
 
 register() {

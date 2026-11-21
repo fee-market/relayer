@@ -15,7 +15,7 @@ process.env.FEE_MARKET_REGISTRY ??= "0x57e6742610229c7Ce09df3028471397DaaE6B9f4"
 process.env.REDEEMER_RESTRICTION_ENFORCER ??= "0x5C75d7ee6d3d27634bec15e96538e794F9c7053b";
 process.env.SPONSOR_ID ??= "1";
 
-const { planOnboard, endpointNeedsPublishing, endpointProblem } = await import("../src/sponsor/flow.js");
+const { planOnboard, endpointNeedsPublishing, endpointProblem, publishedUrlProblem, isPlaceholderUri } = await import("../src/sponsor/flow.js");
 const { checkEndpoint, checkSponsor } = await import("../src/sponsor/doctorChecks.js");
 const { relayerChangeProblem } = await import("../src/sponsor/relayers.js");
 
@@ -55,6 +55,46 @@ test("what can be published: https only, at most 256 bytes", () => {
   assert.match(endpointProblem("http://relay.realsponsor.io")!, /https/);
   assert.match(endpointProblem("https://x.io/" + "a".repeat(300))!, /256/);
   assert.equal(endpointNeedsPublishing(undefined, URL), false);
+});
+test("a URL that ends in /relay is refused: the wallet adds its routes itself", () => {
+  assert.match(endpointProblem(`${URL}/relay`)!, /must not end in \/relay/);
+  assert.match(endpointProblem(`${URL}/relay/`)!, /must not end in \/relay/);
+  assert.equal(endpointProblem(`${URL}/v1`), null, "another path is the sponsor's choice");
+  assert.equal(endpointNeedsPublishing("", `${URL}/relay`), false);
+});
+test("metadata is not published with a placeholder, a plain-http or a /relay URL", () => {
+  assert.equal(publishedUrlProblem(URL), null);
+  assert.match(publishedUrlProblem("https://relay.example.com")!, /placeholder/);
+  assert.match(publishedUrlProblem("https://relay.example/relay")!, /placeholder/);
+  assert.match(publishedUrlProblem("")!, /empty/);
+  assert.match(publishedUrlProblem("http://relay.realsponsor.io")!, /https/);
+  assert.match(publishedUrlProblem(`${URL}/relay`)!, /must not end in \/relay/);
+});
+const { mkdtempSync, writeFileSync } = await import("node:fs");
+const { tmpdir } = await import("node:os");
+const { join } = await import("node:path");
+const { pathToFileURL } = await import("node:url");
+const { loadPlanConfig } = await import("../src/sponsor/planConfig.js");
+const { PricingModel } = await import("../src/sponsor/listing.js");
+test("a saved plan file loads every pricing model, per transaction included, and refuses an unknown one", () => {
+  const plan = (model: string) => ({
+    name: `Plan ${model}`, supportedChains: [137], paymentToken: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+    model, priceBaseUnits: "10000", quota: "0", periodSeconds: "0", caveats: { restrictToRelayer: true, maxCalls: 1, exactBatch: true },
+  });
+  const file = (models: string[]) => {
+    const path = join(mkdtempSync(join(tmpdir(), "plans-")), "sponsor.plans.json");
+    writeFileSync(path, JSON.stringify({ profile: { name: "Acme", region: "eu-west", relayerEndpoint: URL }, plans: models.map(plan) }));
+    return pathToFileURL(path);
+  };
+  const loaded = loadPlanConfig(file(["PER_TXN", "BULK", "SUBSCRIPTION"]));
+  assert.deepEqual(loaded.plans.map((p) => p.model), [PricingModel.PER_TXN, PricingModel.BULK, PricingModel.SUBSCRIPTION]);
+  assert.equal(loaded.plans[0].relayerEndpoint, URL, "plans take the profile's URL");
+  assert.throws(() => loadPlanConfig(file(["FLAT"])), /model must be one of/);
+});
+test("a leftover template metadata URI is recognised, a real one is not", () => {
+  assert.equal(isPlaceholderUri("ipfs://<pin-your-metadata.json>"), true);
+  assert.equal(isPlaceholderUri("ipfs://QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG/metadata.json"), false);
+  assert.equal(isPlaceholderUri(""), false);
 });
 
 console.log("doctor");

@@ -71,8 +71,29 @@ export function endpointProblem(url: string): string | null {
   if (!url) return "PUBLIC_RELAYER_URL is not set";
   if (url.includes("example")) return "PUBLIC_RELAYER_URL is still a placeholder";
   if (!url.startsWith("https://")) return "the relay endpoint must be https";
+  if (endsInRelayPath(url)) return "the relay endpoint must not end in /relay: the wallet adds /relay, /subscribe and /health itself";
   if (new TextEncoder().encode(url).length > 256) return "the relay endpoint is longer than 256 bytes";
   return null;
+}
+
+/** The wallet appends its routes to the published URL, so a URL that already ends in /relay sends every request to /relay/relay. */
+const endsInRelayPath = (url: string) => /\/relay\/?$/i.test(url);
+
+/**
+ * Why a relay URL must not go into the published metadata, or null when it can. The metadata is what the curator
+ * reviews and pins, so a placeholder published by mistake costs a re-publish and a new review.
+ */
+export function publishedUrlProblem(url: string): string | null {
+  if (!url) return "the relay URL is empty";
+  if (url.includes("example")) return `the relay URL is still the placeholder ${url}`;
+  if (!url.startsWith("https://")) return "the relay URL must be https";
+  if (endsInRelayPath(url)) return "the relay URL must not end in /relay: the wallet adds /relay, /subscribe and /health itself";
+  return null;
+}
+
+/** A leftover template value such as ipfs://<pin-your-metadata.json> is not a URI to put on chain. */
+export function isPlaceholderUri(uri: string): boolean {
+  return /[<>]/.test(uri);
 }
 
 const sameUrl = (a: string, b: string) => a.replace(/\/$/, "").toLowerCase() === b.replace(/\/$/, "").toLowerCase();
