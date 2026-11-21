@@ -99,7 +99,9 @@ generate_self_signed() {
 }
 
 choose_tls_mode() {
-  if [ -n "$TLS_MODE" ]; then return 0; fi
+  # Pass "force" to re-prompt even when TLS_MODE is already set.
+  if [ -n "$TLS_MODE" ] && [ "${1:-}" != force ]; then return 0; fi
+  TLS_MODE=""
   section "TLS / certificate"
   note "1) Let's Encrypt (certbot) — real cert; use with Cloudflare Full (strict) or grey-cloud DNS"
   note "2) Import your own certificate — paste PEM or give file paths"
@@ -116,6 +118,218 @@ choose_tls_mode() {
       5 | none | skip | http) TLS_MODE=none; break ;;
       *) say "  Enter 1–5." ;;
     esac
+  done
+}
+
+# Print DNS A lookup vs this server's public IP (does not fail the script).
+show_dns_status() {
+  local ip a
+  ip=$(public_ipv4)
+  a=$(resolve_a "$DOMAIN" | tr '\n' ' ' | sed 's/ $//')
+  if [ -z "$a" ]; then
+    warn "DNS: $DOMAIN has no A record (NXDOMAIN / empty)" "Create an A record → ${ip:-this server}, wait for propagation, then retry"
+    return 1
+  fi
+  if [ -n "$ip" ] && printf ' %s ' "$a" | grep -q " $ip "; then
+    ok "DNS: $DOMAIN → $a (this server)"
+    return 0
+  fi
+  warn "DNS: $DOMAIN → $a (this server is ${ip:-unknown})" "Grey-cloud should match the server IP; orange-cloud (Cloudflare) often shows CF anycast — that can still work for HTTP-01"
+  return 0
+}
+
+ensure_tls_extra_packages() {
+  case "$TLS_MODE" in
+    selfsigned | import)
+      apt-get install -y openssl >/dev/null
+      ;;
+    certbot)
+      case "$KIND" in
+        nginx) apt-get install -y certbot python3-certbot-nginx >/dev/null ;;
+        apache) apt-get install -y certbot python3-certbot-apache >/dev/null ;;
+      esac
+      ;;
+  esac
+}
+
+apply_site_config() {
+  section "Reverse-proxy config → 127.0.0.1:$RELAYER_PORT (TLS_MODE=$TLS_MODE)"
+  case "$KIND" in
+    nginx)
+      SITE=/etc/nginx/sites-available/feemarket-relayer
+      case "$TLS_MODE" in
+        import | selfsigned) write_nginx_https "$SITE" ;;
+        *) write_nginx_http_only "$SITE" ;;
+      esac
+      ln -sfn "$SITE" /etc/nginx/sites-enabled/feemarket-relayer
+      rm -f /etc/nginx/sites-enabled/default
+      nginx -t
+      systemctl enable --now nginx
+      systemctl reload nginx
+      ok "nginx site enabled for $DOMAIN"
+      ;;
+    apache)
+      SITE=/etc/apache2/sites-available/feemarket-relayer.conf
+      case "$TLS_MODE" in
+        import | selfsigned) write_apache_https "$SITE" ;;
+        *) write_apache_http_only "$SITE" ;;
+      esac
+      a2dissite 000-default >/dev/null 2>&1 || true
+      a2ensite feemarket-relayer >/dev/null
+      if [ "$TLS_MODE" = import ] || [ "$TLS_MODE" = selfsigned ]; then
+        a2enmod ssl >/dev/null
+      fi
+      apache2ctl configtest
+      systemctl enable --now apache2
+      systemctl reload apache2
+      ok "Apache site enabled for $DOMAIN"
+      ;;
+  esac
+}
+
+# Prepare cert material for the current TLS_MODE (not certbot — that runs later).
+prepare_certificate_material() {
+  section "Certificate ($TLS_MODE)"
+  case "$TLS_MODE" in
+    certbot)
+      note "Will request a Let's Encrypt cert after the HTTP vhost is up. DNS must point here."
+      note "Cloudflare: use SSL/TLS mode Full (strict), or temporarily grey-cloud for issuance."
+      ;;
+    import)
+      import_certificate
+      ;;
+    selfsigned)
+      generate_self_signed
+      note "In Cloudflare set SSL/TLS to Full (not Flexible, not Full strict)."
+      ;;
+    cf-flexible)
+      warn "Cloudflare Flexible: origin speaks HTTP only" "Anyone who bypasses Cloudflare can hit you on port 80 in cleartext. Prefer Full (strict) + certbot."
+      note "In Cloudflare: SSL/TLS → Flexible. Orange-cloud the DNS record."
+      ;;
+    none)
+      note "HTTP only — no certificate on this host."
+      ;;
+  esac
+}
+
+run_certbot_once() {
+  case "$KIND" in
+    nginx)
+      certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect
+      ;;
+    apache)
+      certbot --apache -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect
+      ;;
+  esac
+}
+
+# Keep the CLI open after certbot failures until the user succeeds or picks another TLS path.
+obtain_certbot_or_recover() {
+  local choice
+  section "Let's Encrypt (certbot)"
+  note "DNS for $DOMAIN must resolve (A or AAAA) before Let's Encrypt will issue."
+  show_dns_status || true
+  print_copyable_settings "$DOMAIN" certbot "$KIND" "$RELAYER_PORT"
+
+  while true; do
+    if ! show_dns_status; then
+      note "Certbot will fail until an A/AAAA record exists. You can still try, or pick another option below."
+    fi
+
+    if confirm "Run certbot for $DOMAIN now?" y; then
+      if [ -z "$EMAIL" ]; then
+        ask EMAIL "Email for Let's Encrypt expiry notices"
+      fi
+      ensure_tls_extra_packages
+      if run_certbot_once; then
+        ok "HTTPS certificate installed for $DOMAIN"
+        note "Cloudflare: set SSL/TLS to Full (strict)."
+        TLS_MODE=certbot
+        return 0
+      fi
+      warn "Certbot failed" "Usually missing/wrong DNS (NXDOMAIN), firewall blocking 80, or Cloudflare SSL mode blocking HTTP-01"
+    else
+      note "Skipped this attempt."
+    fi
+
+    section "Certbot did not finish — what next?"
+    note "Proxy HTTP config is already in place; the script will not exit until you choose."
+    note "1) I fixed DNS / firewall — retry Let's Encrypt"
+    note "2) Switch to Cloudflare Flexible (HTTPS at Cloudflare, HTTP on this server)"
+    note "3) Generate a self-signed cert (Cloudflare SSL mode: Full)"
+    note "4) Import my own certificate / key"
+    note "5) Continue with HTTP only for now (TLS_MODE=none)"
+    note "6) Change domain and retry Let's Encrypt"
+    note "7) Pick a different TLS mode from the full menu"
+    note "8) Abort setup-proxy (proxy stays as HTTP; re-run later)"
+    while true; do
+      ask choice "Choose 1–8" "1"
+      case "$choice" in
+        1 | retry | certbot)
+          apply_site_config
+          break
+          ;;
+        2 | flexible | cf-flexible)
+          TLS_MODE=cf-flexible
+          ensure_tls_extra_packages
+          prepare_certificate_material
+          apply_site_config
+          return 0
+          ;;
+        3 | selfsigned | self)
+          TLS_MODE=selfsigned
+          ensure_tls_extra_packages
+          prepare_certificate_material
+          apply_site_config
+          return 0
+          ;;
+        4 | import)
+          TLS_MODE=import
+          CERT_FILE=""
+          KEY_FILE=""
+          CHAIN_FILE=""
+          ensure_tls_extra_packages
+          prepare_certificate_material
+          apply_site_config
+          return 0
+          ;;
+        5 | none | http)
+          TLS_MODE=none
+          prepare_certificate_material
+          apply_site_config
+          return 0
+          ;;
+        6 | domain)
+          ask DOMAIN "New domain (must have an A record pointing here)"
+          is_domain "$DOMAIN" || {
+            say "  Not a domain name."
+            continue
+          }
+          apply_site_config
+          print_copyable_settings "$DOMAIN" certbot "$KIND" "$RELAYER_PORT"
+          break
+          ;;
+        7 | menu)
+          choose_tls_mode force
+          if [ "$TLS_MODE" = certbot ]; then
+            if [ -z "$EMAIL" ]; then ask EMAIL "Email for Let's Encrypt expiry notices"; fi
+            apply_site_config
+            break
+          fi
+          ensure_tls_extra_packages
+          prepare_certificate_material
+          apply_site_config
+          return 0
+          ;;
+        8 | abort | quit | exit)
+          TLS_MODE=none
+          warn "Leaving proxy on HTTP without a finished cert" "Re-run: sudo bash scripts/vps/setup-proxy.sh $KIND --domain $DOMAIN"
+          apply_site_config
+          return 0
+          ;;
+        *) say "  Enter 1–8." ;;
+      esac
+    done
   done
 }
 
@@ -315,74 +529,12 @@ case "$KIND" in
     ;;
 esac
 
-section "Certificate ($TLS_MODE)"
-case "$TLS_MODE" in
-  certbot)
-    note "Will request a Let's Encrypt cert after the HTTP vhost is up. DNS must point here."
-    note "Cloudflare: use SSL/TLS mode Full (strict), or temporarily grey-cloud for issuance."
-    ;;
-  import)
-    import_certificate
-    ;;
-  selfsigned)
-    generate_self_signed
-    note "In Cloudflare set SSL/TLS to Full (not Flexible, not Full strict)."
-    ;;
-  cf-flexible)
-    warn "Cloudflare Flexible: origin speaks HTTP only" "Anyone who bypasses Cloudflare can hit you on port 80 in cleartext. Prefer Full (strict) + certbot."
-    note "In Cloudflare: SSL/TLS → Flexible. Orange-cloud the DNS record."
-    ;;
-  none)
-    note "HTTP only — no certificate on this host."
-    ;;
-esac
-
-section "Reverse-proxy config → 127.0.0.1:$RELAYER_PORT"
-case "$KIND" in
-  nginx)
-    SITE=/etc/nginx/sites-available/feemarket-relayer
-    case "$TLS_MODE" in
-      import | selfsigned) write_nginx_https "$SITE" ;;
-      *) write_nginx_http_only "$SITE" ;;
-    esac
-    ln -sfn "$SITE" /etc/nginx/sites-enabled/feemarket-relayer
-    rm -f /etc/nginx/sites-enabled/default
-    nginx -t
-    systemctl enable --now nginx
-    systemctl reload nginx
-    ok "nginx site enabled for $DOMAIN"
-    ;;
-  apache)
-    SITE=/etc/apache2/sites-available/feemarket-relayer.conf
-    case "$TLS_MODE" in
-      import | selfsigned) write_apache_https "$SITE" ;;
-      *) write_apache_http_only "$SITE" ;;
-    esac
-    a2dissite 000-default >/dev/null 2>&1 || true
-    a2ensite feemarket-relayer >/dev/null
-    if [ "$TLS_MODE" = import ] || [ "$TLS_MODE" = selfsigned ]; then
-      a2enmod ssl >/dev/null
-    fi
-    apache2ctl configtest
-    systemctl enable --now apache2
-    systemctl reload apache2
-    ok "Apache site enabled for $DOMAIN"
-    ;;
-esac
+prepare_certificate_material
+apply_site_config
 
 if [ "$TLS_MODE" = certbot ]; then
-  section "Let's Encrypt (certbot)"
-  note "DNS for $DOMAIN must already point here (or be orange-clouded with a temporary HTTP challenge path)."
-  if confirm "Obtain / renew HTTPS certificate with certbot now?"; then
-    case "$KIND" in
-      nginx) certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect ;;
-      apache) certbot --apache -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect ;;
-    esac
-    ok "HTTPS certificate installed for $DOMAIN"
-    note "Cloudflare: set SSL/TLS to Full (strict)."
-  else
-    skip "Skipped certbot. Later: sudo certbot --$KIND -d $DOMAIN"
-  fi
+  # On failure, stays interactive until the user retries or switches TLS mode.
+  obtain_certbot_or_recover
 fi
 
 section "Relayer .env"
