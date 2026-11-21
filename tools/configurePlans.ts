@@ -23,6 +23,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ENV_PATH = join(ROOT, ".env");
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 
+const note = (s: string) => console.log(`  · ${s}`);
 const ask = async (q: string, def = "") => {
   const a = (await rl.question(def ? `${q} [${def}]: ` : `${q}: `)).trim();
   return a || def;
@@ -127,31 +128,45 @@ async function main() {
     if (!addMore) break;
 
     const planName = await ask("Plan name", `${name} — Plan ${plans.length + 1}`);
-    console.log("  Pricing model: 1) Per transaction  2) Bulk bundle  3) Subscription");
+    console.log("  Pricing model:");
+    note("1) Per transaction — user prepays; you charge the plan price each sponsored send");
+    note("2) Bulk bundle — user buys N sends up front (e.g. 1000 for a fixed price)");
+    note("3) Subscription — fixed price per period (e.g. 30 days); optional send cap per period");
     const modelChoice = await ask("  Choose 1-3", "1");
     const model: PlanConfigFile["plans"][number]["model"] =
       modelChoice === "2" ? "BULK" : modelChoice === "3" ? "SUBSCRIPTION" : "PER_TXN";
 
+    note("Token users pay with (Polygon USDC by default). Must match what your node accepts.");
     const paymentToken = await askAddress("  Payment token address", USDC_POLYGON);
     let priceUsd: string,
       quota = "0",
       periodDays = "0";
     if (model === "PER_TXN") {
+      note("How much USDC (in dollars) to debit from the user's escrow for each sponsored send.");
       priceUsd = await askNumber("  Price per transaction, in USD", "0.01");
     } else if (model === "BULK") {
+      note("How many sponsored sends the user gets when they buy this bundle.");
       quota = await askNumber("  Bundle size (number of transactions)", "1000");
+      note("One-time price for the whole bundle (debited when they subscribe).");
       priceUsd = await askNumber(`  Price for the whole bundle of ${quota}, in USD`, "10");
     } else {
+      note("Length of one billing period before the subscription expires.");
       periodDays = await askNumber("  Period length, in days", "30");
+      note("Price charged for each period when the user subscribes / renews.");
       priceUsd = await askNumber(`  Price per ${periodDays}-day period, in USD`, "25");
+      note("Hard cap on sponsored sends in that period. 0 = unlimited (still gas-capped by your node).");
       quota = await askNumber("  Max transactions per period (0 = unlimited)", "0");
     }
     const priceBaseUnits = String(Math.round(Number(priceUsd) * 1e6));
     const periodSeconds = String(Number(periodDays) * 86400);
 
-    console.log("  Caveats (what the relayer requires on every delegation):");
+    console.log("  Caveats — on-chain rules every user delegation must carry (protects you):");
+    note("Delegations are always locked to YOUR relayer set (cannot be redeemed by another sponsor).");
+    note("Pin exact batch: the signed call list cannot be swapped for a different one at redeem time. Keep yes unless you know you need flexible batches.");
     const exactBatch = await askYesNo("  Pin the exact batch (recommended)?", true);
+    note("Max redemptions of ONE signed delegation. 1 = single-use (recommended: stops replay). Higher = same signature can be redeemed multiple times.");
     const maxCallsStr = await askNumber("  Max calls per delegation (1 = no replay)", "1");
+    note("Spend cap: optional extra limit on how much of a token the user's batch may move in that one redemption (e.g. max 50 USDC transfer). Usually leave off — escrow/plan price already limits what you earn.");
     const addSpendCap = await askYesNo("  Add a per-token spend cap?", false);
     const caveats: PlanConfigFile["plans"][number]["caveats"] = {
       restrictToRelayer: true,
@@ -159,7 +174,9 @@ async function main() {
       ...(exactBatch ? { exactBatch: true } : {}),
     };
     if (addSpendCap) {
+      note("Token whose transfers in the batch are capped (often the same as the payment token).");
       const token = await askAddress("    Spend-cap token address", paymentToken);
+      note("Max amount of that token the batch may spend/transfer in one redemption.");
       const maxAmountUsd = await askNumber("    Max amount, in USD", "50");
       caveats.spendCaps = [{ token, maxAmount: String(Math.round(Number(maxAmountUsd) * 1e6)) }];
     }
