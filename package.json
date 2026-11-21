@@ -5,6 +5,7 @@
   "description": "Sponsor-side relayer for v1.fee.market \u2014 validates user delegations and broadcasts EIP-7702 (type-4) redemptions paying gas on the user's behalf.",
   "type": "module",
   "scripts": {
+    "setup": "npm install --no-audit --no-fund --loglevel=error",
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json && cp -r src/public dist/public",
     "start": "node dist/index.js",
@@ -57,11 +58,11 @@
     "key:check": "tsx src/sponsor/keystore.ts check"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1159.0",
-    "dotenv": "^18.0.9",
+    "@aws-sdk/client-s3": "^3.1175.0",
+    "dotenv": "^18.0.10",
     "express": "^5.3.0",
-    "thirdweb": "^5.122.0",
-    "viem": "^2.57.13",
+    "thirdweb": "^5.122.1",
+    "viem": "^2.58.4",
     "zod": "^4.6.7"
   },
   "devDependencies": {

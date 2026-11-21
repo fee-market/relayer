@@ -25,7 +25,7 @@ wallet / dApp ──POST /relay──▶  [your sponsor node]
 ## Quick start
 
 ```bash
-git clone <repo> && cd <repo>/relayer && npm install
+git clone <repo> && cd <repo>/relayer && npm run setup
 npm run sponsor:init        # writes .env and generates your relayer key (then fund it with a little POL)
 npm run sponsor:plans:configure   # interactive: define your profile + plans, writes sponsor.plans.json
 npm run sponsor:onboard     # register (or reuse), write SPONSOR_ID, publish metadata; re-runnable
