@@ -2,6 +2,7 @@
   "name": "@feemarket/relayer",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Sponsor-side relayer for v1.fee.market \u2014 validates user delegations and broadcasts EIP-7702 (type-4) redemptions paying gas on the user's behalf.",
   "type": "module",
   "scripts": {
