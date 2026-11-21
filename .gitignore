@@ -28,6 +28,9 @@ secrets/
 *.password
 *.password.txt
 
+# Sponsor local config (CLI-written; never commit)
+sponsor.plans.json
+
 # Runtime data & local state
 data/
 *.log

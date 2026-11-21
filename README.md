@@ -31,6 +31,17 @@ Dev: `npm run dev` then `curl localhost:8787/health`.
 | Cloudflare Tunnel | `bash scripts/setup-tunnel.sh relay.yourdomain.com` |
 | Docker | `docker compose up -d --build` (set `PUBLIC_DOMAIN` in `.env`) |
 
+### Updating a live node
+
+Do **not** run bare `git pull` on the server — `npm install` often dirties `package-lock.json` and blocks the merge. Use:
+
+```bash
+npm run update
+# or: bash scripts/update.sh
+```
+
+That resets regenerable lockfile noise, `git pull --ff-only`, runs `npm ci`, then `docker compose up -d --build`. Your `.env`, `sponsor.plans.json`, `data/`, and `secrets/` are left alone. If you edited tracked source on the box, the script stops; pass `--force` only if you mean to discard those edits.
+
 ## Configuration
 
 Copy [`.env.example`](.env.example) — every variable is documented there. Minimum to run:
