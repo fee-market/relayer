@@ -391,21 +391,49 @@ EOF
 fi
 
 # Current Active LTS from NodeSource (receives security patches). Minimum supported major is 22.
+# Host Node is required for sponsor CLI always; for nginx/apache/bare/tunnel the Node *process*
+# also runs on the host (Docker image is only enough when PUBLISH_MODE=docker).
 NODE_MIN_MAJOR=22
+install_node_lts() {
+  local script
+  script=$(mktemp)
+  # setup_lts.x tracks the current Active LTS line — not a frozen major like setup_22.x.
+  run curl -fsSL https://deb.nodesource.com/setup_lts.x -o "$script"
+  run bash "$script"
+  run apt-get install -y nodejs
+  rm -f "$script"
+  hash -r 2>/dev/null || true
+  if have node && have npm; then
+    ok "Node.js $(node -v) / npm $(npm -v) installed system-wide (all users: /usr/bin)"
+  else
+    warn "NodeSource finished but node/npm still not on PATH" "which node; ls /usr/bin/node"
+  fi
+}
+
 NODE=$(node_major)
 if [ -n "$NODE" ] && [ "$NODE" -ge "$NODE_MIN_MAJOR" ]; then
   ok "Node.js $(node -v) is installed (meets >=$NODE_MIN_MAJOR)"
   note "apt will keep applying NodeSource security updates for this major."
 elif confirm "Install Node.js LTS from NodeSource (current Active LTS, security-patched via apt)?"; then
-  NODESOURCE_SCRIPT=$(mktemp)
-  # setup_lts.x tracks the current Active LTS line — not a frozen major like setup_22.x.
-  run curl -fsSL https://deb.nodesource.com/setup_lts.x -o "$NODESOURCE_SCRIPT"
-  run bash "$NODESOURCE_SCRIPT"
-  run apt-get install -y nodejs
-  rm -f "$NODESOURCE_SCRIPT"
-  ok "Node.js $(node -v 2>/dev/null || echo LTS) is installed"
+  install_node_lts
 else
-  skip "Node.js skipped (sponsor CLI needs Node >=$NODE_MIN_MAJOR; Docker image uses node:lts)"
+  skip "Node.js skipped"
+fi
+
+NODE=$(node_major)
+needs_host_node=1
+[ "${PUBLISH_MODE:-docker}" = docker ] && needs_host_node=0
+if { [ -z "$NODE" ] || [ "$NODE" -lt "$NODE_MIN_MAJOR" ]; } && [ "$needs_host_node" -eq 1 ]; then
+  warn "Node.js >= $NODE_MIN_MAJOR is required on the host for $PUBLISH_MODE" \
+    "sponsor CLI + the relayer process run as $NODE_USER — Docker alone is not enough"
+  if confirm "Install Node.js LTS now? (recommended)" y; then
+    install_node_lts
+  fi
+elif { [ -z "$NODE" ] || [ "$NODE" -lt "$NODE_MIN_MAJOR" ]; } && [ "$needs_host_node" -eq 0 ]; then
+  note "Docker image has Node; you still need host Node for sponsor:init / plans / doctor. Install later if you skip."
+  if confirm "Install host Node.js LTS anyway (for CLI tools)?" y; then
+    install_node_lts
+  fi
 fi
 
 # Optional host reverse proxy (nginx / Apache) — Ubuntu packages + Certbot.
@@ -454,31 +482,56 @@ if [ "$DRY" -eq 1 ]; then
   note "That was a dry run. Run it again without --dry-run to apply."
   exit 0
 fi
-say "Next, as $NODE_USER (a fresh login, so the docker group applies):"
+
+HINT_DOMAIN=node.example.com
+if [ -f "$ENV_FILE" ]; then
+  d=$(env_get "$ENV_FILE" PUBLIC_DOMAIN)
+  [ -n "$d" ] && HINT_DOMAIN=$d
+elif [ -f "$TARGET/.env" ]; then
+  d=$(env_get "$TARGET/.env" PUBLIC_DOMAIN)
+  [ -n "$d" ] && HINT_DOMAIN=$d
+fi
+
+NODE=$(node_major)
+if [ -z "$NODE" ] || [ "$NODE" -lt "$NODE_MIN_MAJOR" ]; then
+  warn "Node.js is still missing on this server" "Install as root before switching to $NODE_USER:"
+  printf '\n     curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -\n'
+  printf '     apt-get install -y nodejs\n'
+  printf '     node -v && npm -v          # should work for every user\n\n'
+  note "Or re-run: sudo bash scripts/vps/prepare.sh  and accept the Node.js step."
+else
+  ok "Host Node $(node -v) is ready for $NODE_USER"
+fi
+
+say "Next, as $NODE_USER (fresh login so docker group / PATH apply):"
 printf '\n     ssh -p %s %s@%s\n' "$SSH_PORT" "$NODE_USER" "$(public_ipv4 || true)"
+printf '     # or from root: su - %s\n' "$NODE_USER"
 printf '     cd %s\n' "$TARGET"
-printf '     bash scripts/vps/check.sh --domain relay.example.com   # what is still missing\n'
+printf '     node -v && npm -v\n'
+printf '     bash scripts/vps/check.sh --domain %s\n' "$HINT_DOMAIN"
 case "${PUBLISH_MODE:-docker}" in
   nginx | apache)
-    printf '     npm run setup && npm run sponsor:init && npm run sponsor:plans:configure\n'
-    printf '     sudo bash scripts/vps/setup-proxy.sh %s --domain your.domain   # if not done above\n' "$PUBLISH_MODE"
-    printf '     npm run build && npm start                  # HOST=127.0.0.1; %s has HTTPS\n\n' "$PUBLISH_MODE"
+    printf '     npm run setup\n'
+    printf '     npm run sponsor:init\n'
+    printf '     npm run sponsor:plans:configure\n'
+    printf '     # proxy already done if you accepted it above; else:\n'
+    printf '     #   sudo bash scripts/vps/setup-proxy.sh %s --domain %s\n' "$PUBLISH_MODE" "$HINT_DOMAIN"
+    printf '     npm run build && HOST=127.0.0.1 npm start\n'
+    printf '     bash scripts/vps/check-endpoint.sh %s\n\n' "$HINT_DOMAIN"
     note "$PUBLISH_MODE stays patched via apt. Renewals: certbot systemd timer."
     ;;
   bare)
     printf '     npm run setup && npm run sponsor:init && npm run sponsor:plans:configure\n'
-    printf '     npm run build && HOST=0.0.0.0 npm start            # bare node (no HTTPS)\n'
-    printf '     # or: sudo bash scripts/vps/setup-proxy.sh nginx|apache\n'
-    printf '     # or: bash scripts/setup-tunnel.sh relay.yourdomain.com\n\n'
+    printf '     npm run build && HOST=0.0.0.0 npm start\n\n'
     ;;
   tunnel)
     printf '     npm run setup && npm run sponsor:init && npm run sponsor:plans:configure\n'
     printf '     npm run build && npm start\n'
-    printf '     bash scripts/setup-tunnel.sh relay.yourdomain.com\n\n'
+    printf '     bash scripts/setup-tunnel.sh %s\n\n' "$HINT_DOMAIN"
     ;;
   *)
-    printf '     bash scripts/vps/setup.sh                              # guided node setup (Docker + Caddy)\n\n'
-    note "Before setup.sh: point the A record of your domain at this server, and have your RPC URL and payout address ready."
+    printf '     bash scripts/vps/setup.sh                              # guided Docker + Caddy setup\n\n'
+    note "Before setup.sh: A record for your domain → this server; have RPC URL and payout address ready."
     ;;
 esac
-note "Later upgrades: cd $TARGET && npm run update"
+note "Do not run npm run update until the node is set up once. Later upgrades: cd $TARGET && npm run update"
