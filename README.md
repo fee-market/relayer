@@ -117,6 +117,24 @@ Copy [`.env.example`](.env.example). Minimum:
 
 **Not in `.env`:** sponsor name, region, description, website, support URL, plan terms → `sponsor.plans.json` via `sponsor:plans:configure`.
 
+## Changing configuration later
+
+Run these as the node user, in `~/relayer`. The node reads `.env` only when it starts. Plans and profile live on chain, so changing them doesn't need a restart.
+
+| You want to change | Do this | Restart? | Verification |
+|---|---|---|---|
+| Limits, RPC, CORS, alerts, dashboard token (anything in `.env`) | Edit `.env`, then `npm run sponsor:ensure-running` | Yes, done by that command | Unchanged |
+| Code version | `npm run update` | Yes, done by that command | Unchanged |
+| Plans, name, region, description, website | `npm run sponsor:plans:configure`, then `npm run sponsor:onboard -- --reverify`. After the curator re-verifies, run `npm run sponsor:setup -- --go-live` to list the new plans. | No | **Back to PENDING** |
+| Domain / public URL | `npm run sponsor:setup` and pick the new domain (HTTPS + node), then the plans row above for the new URL | Yes, done by setup | **Back to PENDING** |
+| Proxy or certificate (nginx, Apache, Caddy, tunnel) | `npm run sponsor:setup` and answer no to "Publish the node with …?" | Yes, done by setup | Unchanged |
+| Relayer key or payout wallet | `npm run sponsor:rotate` from the payout wallet (see [COMMANDS.md](COMMANDS.md)), then update `.env` and run `npm run sponsor:onboard -- --reverify` | Yes (`sponsor:ensure-running`) | **Back to PENDING** |
+
+When in doubt:
+- `npm run sponsor:setup` re-checks everything and only redoes what changed.
+- `npm run sponsor:onboard -- --dry-run` shows whether a change would reset your verification, without sending anything.
+- `npm run sponsor:check-endpoint` confirms the node still answers publicly.
+
 ## Common commands
 
 | Script | Role |
