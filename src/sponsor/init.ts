@@ -75,7 +75,13 @@ async function main() {
   if (!thirdwebKey) {
     console.log(`  metadata storage: no THIRDWEB_SECRET_KEY/THIRDWEB_CLIENT_ID yet — get one free at https://thirdweb.com/dashboard before \`sponsor:onboard\`, or set METADATA_STORAGE=filone to use your own S3 bucket instead.`);
   }
-  console.log(`\nNext: fund the relayer, then \`npm run sponsor:doctor\`, \`npm run sponsor:register\`.`);
+  console.log(`\nNext:`);
+  console.log(`  1. Fund the relayer address with POL`);
+  console.log(`  2. Bring up HTTPS (DNS + npm run sponsor:serve  or  setup-proxy) → set PUBLIC_RELAYER_URL`);
+  console.log(`  3. npm run sponsor:check-endpoint`);
+  console.log(`  4. npm run sponsor:plans:configure`);
+  console.log(`  5. npm run sponsor:onboard`);
+  console.log(`  See COMMANDS.md / README.md for the full flow.`);
 }
 
 // Only run as a script, so tests can import setEnv.

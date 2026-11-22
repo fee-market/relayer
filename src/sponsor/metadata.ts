@@ -56,10 +56,10 @@ export function buildMetadata() {
     name: SPONSOR_PROFILE.name,
     region: SPONSOR_PROFILE.region,
     relayerEndpoint: SPONSOR_PROFILE.relayerEndpoint,
-    // Only included when set, so a sponsor that sets none publishes exactly the bytes it always did.
-    ...(process.env.SPONSOR_DESCRIPTION ? { description: process.env.SPONSOR_DESCRIPTION } : {}),
-    ...(process.env.SPONSOR_WEBSITE ? { website: process.env.SPONSOR_WEBSITE } : {}),
-    ...(process.env.SPONSOR_SUPPORT_URL ? { supportUrl: process.env.SPONSOR_SUPPORT_URL } : {}),
+    // Optional wallet profile fields — set in sponsor.plans.json via `plans:configure`, not .env.
+    ...(SPONSOR_PROFILE.description ? { description: SPONSOR_PROFILE.description } : {}),
+    ...(SPONSOR_PROFILE.website ? { website: SPONSOR_PROFILE.website } : {}),
+    ...(SPONSOR_PROFILE.supportUrl ? { supportUrl: SPONSOR_PROFILE.supportUrl } : {}),
     relayer: relayerAddress,
     // The cold wallet from SPONSOR_PAYOUT_ADDRESS. Falling back to the relayer is only the same-key test setup;
     // a distinct payout is what registration stored, and validateMetadata rejects a mismatch.

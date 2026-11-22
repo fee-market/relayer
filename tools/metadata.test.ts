@@ -49,22 +49,18 @@ test("profile fields are optional: metadata without them is unchanged, and with 
   sponsorMetadataSchema.parse({ ...base, description: "Fast, cheap gas.", website: "https://sponsor.example", supportUrl: "https://sponsor.example/help" });
 });
 
-test("profile fields from the environment are included and bad ones are rejected", () => {
-  process.env.SPONSOR_DESCRIPTION = "Fast, cheap gas.";
-  process.env.SPONSOR_WEBSITE = "https://sponsor.example";
-  try {
-    const m = sample();
-    assert.equal(m.description, "Fast, cheap gas.");
-    assert.equal(m.website, "https://sponsor.example");
-    sponsorMetadataSchema.parse(m);
-    assert.throws(() => sponsorMetadataSchema.parse({ ...m, website: "http://insecure.example" }), /https/);
-    assert.throws(() => sponsorMetadataSchema.parse({ ...m, supportUrl: "javascript:alert(1)" }));
-    assert.throws(() => sponsorMetadataSchema.parse({ ...m, description: "x".repeat(281) }));
-    assert.throws(() => sponsorMetadataSchema.parse({ ...m, description: "" }));
-  } finally {
-    delete process.env.SPONSOR_DESCRIPTION;
-    delete process.env.SPONSOR_WEBSITE;
-  }
+test("optional profile fields validate when present; bad ones are rejected", () => {
+  const m = {
+    ...sample(),
+    description: "Fast, cheap gas.",
+    website: "https://sponsor.example",
+    supportUrl: "https://sponsor.example/help",
+  };
+  sponsorMetadataSchema.parse(m);
+  assert.throws(() => sponsorMetadataSchema.parse({ ...m, website: "http://insecure.example" }), /https/);
+  assert.throws(() => sponsorMetadataSchema.parse({ ...m, supportUrl: "javascript:alert(1)" }));
+  assert.throws(() => sponsorMetadataSchema.parse({ ...m, description: "x".repeat(281) }));
+  assert.throws(() => sponsorMetadataSchema.parse({ ...m, description: "" }));
 });
 
 test("the payout address is the cold wallet when SPONSOR_PAYOUT_ADDRESS is set", () => {

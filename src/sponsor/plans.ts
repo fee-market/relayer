@@ -13,9 +13,19 @@ import { PricingModel, type SponsorRequirements } from "./listing.js";
  */
 const fromConfigFile = planConfigExists() ? loadPlanConfig() : null;
 
-export const SPONSOR_PROFILE = fromConfigFile?.profile ?? {
-  name: process.env.SPONSOR_NAME ?? "My Gas Co",
-  region: process.env.SPONSOR_REGION ?? "eu-west",
+export type SponsorProfile = {
+  name: string;
+  region: string;
+  relayerEndpoint: string;
+  description?: string;
+  website?: string;
+  supportUrl?: string;
+};
+
+/** Profile comes from sponsor.plans.json after `plans:configure`. Env is only a last-resort URL for the file-less fallback. */
+export const SPONSOR_PROFILE: SponsorProfile = fromConfigFile?.profile ?? {
+  name: "My Gas Co",
+  region: "eu-west",
   relayerEndpoint: process.env.PUBLIC_RELAYER_URL ?? "https://relay.example.com",
 };
 

@@ -1,11 +1,11 @@
 /**
- * Interactive builder for sponsor.plans.json — profile, plans, and (optionally) the public
- * HTTPS endpoint on this VPS (Caddy via Docker Compose — not Apache/nginx).
+ * Interactive builder for sponsor.plans.json (profile + plans).
  *
  *   npm run sponsor:plans:configure
  *
- * Writes sponsor.plans.json, syncs PUBLIC_DOMAIN / PUBLIC_RELAYER_URL into .env, then can start
- * `docker compose` so wallets reach this machine at that URL.
+ * Prefer setting PUBLIC_RELAYER_URL first (DNS + proxy / tunnel + ensure-running), then run this.
+ * Writes sponsor.plans.json and syncs PUBLIC_DOMAIN / PUBLIC_RELAYER_URL into .env.
+ * Profile name/region/optional wallet blurb live in the JSON file — not in .env.
  */
 import "dotenv/config";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -85,23 +85,26 @@ async function main() {
   const existing: PlanConfigFile | null = existsSync(PLAN_CONFIG_PATH) ? JSON.parse(readFileSync(PLAN_CONFIG_PATH, "utf8")) : null;
   if (existing) console.log(`Found an existing ${PLAN_CONFIG_PATH.pathname} — editing it.\n`);
 
-  console.log("── Sponsor profile ──");
-  const name = await ask("Sponsor name", existing?.profile.name ?? "My Gas Co");
-  const region = await ask("Region (e.g. eu-west, us-east)", existing?.profile.region ?? "eu-west");
-
+  console.log("── Public node URL ──");
+  note("Set this up first: DNS A record → this host, then proxy/tunnel + npm run sponsor:ensure-running.");
+  note("PUBLIC_RELAYER_URL in .env is the default below when it looks valid.");
   const envUrl = (process.env.PUBLIC_RELAYER_URL ?? "").replace(/\/$/, "").replace(/\/relay$/i, "");
   const usableEnvUrl = publishedUrlProblem(envUrl) === null ? envUrl : "";
   const saved = existing?.profile.relayerEndpoint?.replace(/\/$/, "").replace(/\/relay$/i, "");
   if (saved && usableEnvUrl && saved !== usableEnvUrl) {
-    console.log(`  note: the saved URL is ${saved}, but PUBLIC_RELAYER_URL in .env is ${usableEnvUrl}`);
+    console.log(`  note: plans file has ${saved}, .env has ${usableEnvUrl}`);
+  }
+  if (!usableEnvUrl && !saved) {
+    console.log("  ! No usable PUBLIC_RELAYER_URL yet. Prefer finishing HTTPS first:");
+    note("npm run sponsor:serve   or   sudo bash scripts/vps/setup-proxy.sh apache|nginx");
+    note("npm run sponsor:check-endpoint");
   }
 
-  console.log("  This host's public HTTPS name (DNS A record → this VPS). No path; wallets add /relay themselves.");
   let relayerEndpoint = "";
   while (true) {
     const raw = await ask(
-      "Public URL of your node (https://relay.example.com)",
-      saved && publishedUrlProblem(saved) === null ? saved : usableEnvUrl,
+      "Public URL of your node (https://node.example.com)",
+      usableEnvUrl || (saved && publishedUrlProblem(saved) === null ? saved : ""),
     );
     try {
       relayerEndpoint = normalizePublicBase(raw);
@@ -113,6 +116,14 @@ async function main() {
     if (!problem) break;
     console.log(`  ${problem}`);
   }
+  const { domain } = syncPublicEnv(relayerEndpoint);
+
+  console.log("\n── Sponsor profile (stored in sponsor.plans.json, not .env) ──");
+  const name = await ask("Sponsor name", existing?.profile.name ?? "My Gas Co");
+  const region = await ask("Region (e.g. eu-west, us-east)", existing?.profile.region ?? "eu-west");
+  const description = await ask("Short description for wallets (optional, empty to skip)", existing?.profile.description ?? "");
+  const website = await ask("Website https://… (optional)", existing?.profile.website ?? "");
+  const supportUrl = await ask("Support URL https://… (optional)", existing?.profile.supportUrl ?? "");
 
   const plans: PlanConfigFile["plans"] = [];
   if (existing?.plans.length) {
@@ -201,66 +212,77 @@ async function main() {
     return;
   }
 
-  const out: PlanConfigFile = { profile: { name, region, relayerEndpoint }, plans };
+  const profile: PlanConfigFile["profile"] = {
+    name,
+    region,
+    relayerEndpoint,
+    ...(description ? { description } : {}),
+    ...(website ? { website } : {}),
+    ...(supportUrl ? { supportUrl } : {}),
+  };
+  const out: PlanConfigFile = { profile, plans };
   writeFileSync(PLAN_CONFIG_PATH, JSON.stringify(out, null, 2) + "\n");
   console.log(`\n✓ wrote ${PLAN_CONFIG_PATH.pathname} (${plans.length} plan${plans.length === 1 ? "" : "s"})`);
 
-  console.log("\n── Public endpoint on this machine ──");
-  console.log("  DNS: an A record for the hostname must already point at this server.");
-  note("1) Caddy via Docker (recommended)");
-  note("2) nginx + Certbot — Ubuntu package, security updates via apt");
-  note("3) Apache + Certbot — Ubuntu package, security updates via apt");
-  note("4) Skip for now");
-  const { domain } = syncPublicEnv(relayerEndpoint);
-
-  const proxyChoice = (await ask("  HTTPS front-end", "1")).toLowerCase();
-  if (proxyChoice === "2" || proxyChoice === "nginx") {
-    if (existsSync(ENV_PATH)) writeEnvKey("PROXY_KIND", "nginx");
-    const runNow = await askYesNo("  Run setup-proxy + start the node service now? (needs sudo)", true);
-    rl.close();
-    console.log(`  → sudo bash scripts/vps/setup-proxy.sh nginx --domain ${domain}`);
-    if (runNow) {
-      spawnSync("sudo", ["bash", join(ROOT, "scripts/vps/setup-proxy.sh"), "nginx", "--domain", domain], {
-        stdio: "inherit",
-        cwd: ROOT,
-      });
-      spawnSync("bash", [join(ROOT, "scripts/ensure-node-running.sh")], { stdio: "inherit", cwd: ROOT });
+  console.log("\n── HTTPS / keep node running (optional if already up) ──");
+  if (await askYesNo("Configure or refresh the public endpoint on this machine now?", !usableEnvUrl)) {
+    note("1) Caddy via Docker (recommended)");
+    note("2) nginx + Certbot");
+    note("3) Apache + Certbot");
+    note("4) Skip");
+    const proxyChoice = (await ask("  HTTPS front-end", usableEnvUrl ? "4" : "1")).toLowerCase();
+    if (proxyChoice === "2" || proxyChoice === "nginx") {
+      if (existsSync(ENV_PATH)) writeEnvKey("PROXY_KIND", "nginx");
+      const runNow = await askYesNo("  Run setup-proxy + start the node service now? (needs sudo)", true);
+      rl.close();
+      if (runNow) {
+        spawnSync("sudo", ["bash", join(ROOT, "scripts/vps/setup-proxy.sh"), "nginx", "--domain", domain], {
+          stdio: "inherit",
+          cwd: ROOT,
+        });
+        spawnSync("bash", [join(ROOT, "scripts/ensure-node-running.sh")], { stdio: "inherit", cwd: ROOT });
+      } else {
+        console.log(`  → sudo bash scripts/vps/setup-proxy.sh nginx --domain ${domain}`);
+        console.log("  → npm run sponsor:ensure-running");
+      }
+    } else if (proxyChoice === "3" || proxyChoice === "apache") {
+      if (existsSync(ENV_PATH)) writeEnvKey("PROXY_KIND", "apache");
+      const runNow = await askYesNo("  Run setup-proxy + start the node service now? (needs sudo)", true);
+      rl.close();
+      if (runNow) {
+        spawnSync("sudo", ["bash", join(ROOT, "scripts/vps/setup-proxy.sh"), "apache", "--domain", domain], {
+          stdio: "inherit",
+          cwd: ROOT,
+        });
+        spawnSync("bash", [join(ROOT, "scripts/ensure-node-running.sh")], { stdio: "inherit", cwd: ROOT });
+      } else {
+        console.log(`  → sudo bash scripts/vps/setup-proxy.sh apache --domain ${domain}`);
+        console.log("  → npm run sponsor:ensure-running");
+      }
+    } else if (proxyChoice === "4" || proxyChoice === "skip" || proxyChoice === "n") {
+      rl.close();
+      console.log("  Skipped. Ensure the node is up: npm run sponsor:ensure-running");
     } else {
-      console.log("  → later: npm run sponsor:serve");
+      if (existsSync(ENV_PATH)) writeEnvKey("PROXY_KIND", "caddy");
+      if (!dockerReady()) {
+        rl.close();
+        console.log("  ! Docker Compose not available — sudo bash scripts/vps/prepare.sh");
+        console.log(`  Or: sudo bash scripts/vps/setup-proxy.sh nginx --domain ${domain}`);
+      } else if (await askYesNo(`Start HTTPS for ${domain} with Caddy + relayer now?`, true)) {
+        rl.close();
+        startPublicEndpoint();
+      } else {
+        rl.close();
+        console.log("  Skipped. Later: npm run sponsor:serve");
+      }
     }
-  } else if (proxyChoice === "3" || proxyChoice === "apache") {
-    if (existsSync(ENV_PATH)) writeEnvKey("PROXY_KIND", "apache");
-    const runNow = await askYesNo("  Run setup-proxy + start the node service now? (needs sudo)", true);
-    rl.close();
-    console.log(`  → sudo bash scripts/vps/setup-proxy.sh apache --domain ${domain}`);
-    if (runNow) {
-      spawnSync("sudo", ["bash", join(ROOT, "scripts/vps/setup-proxy.sh"), "apache", "--domain", domain], {
-        stdio: "inherit",
-        cwd: ROOT,
-      });
-      spawnSync("bash", [join(ROOT, "scripts/ensure-node-running.sh")], { stdio: "inherit", cwd: ROOT });
-    } else {
-      console.log("  → later: npm run sponsor:serve");
-    }
-  } else if (proxyChoice === "4" || proxyChoice === "skip" || proxyChoice === "n") {
-    rl.close();
-    console.log("  Skipped. Later: npm run sponsor:serve  or  sudo bash scripts/vps/setup-proxy.sh nginx|apache");
   } else {
-    if (existsSync(ENV_PATH)) writeEnvKey("PROXY_KIND", "caddy");
-    if (!dockerReady()) {
-      rl.close();
-      console.log("  ! Docker Compose not available — sudo bash scripts/vps/prepare.sh");
-      console.log(`  Or: sudo bash scripts/vps/setup-proxy.sh nginx --domain ${domain}`);
-    } else if (await askYesNo(`Start HTTPS for ${domain} with Caddy + relayer now?`, true)) {
-      rl.close();
-      startPublicEndpoint();
-    } else {
-      rl.close();
-      console.log("  Skipped. Later: npm run sponsor:serve");
-    }
+    rl.close();
+    console.log("  OK — using existing endpoint. Keep it running for the curator.");
   }
 
-  console.log("\nNext: `npm run sponsor:onboard` (registers, publishes metadata, and keeps the node running for the curator).");
+  console.log("\nNext: `npm run sponsor:onboard` (register + publish metadata + keep node running).");
+  console.log("Status later: `npm run sponsor:status` or re-run onboard. After VERIFIED: `npm run sponsor:go`.");
 }
 
 main().catch((e) => {

@@ -8,7 +8,15 @@ import { PricingModel, type CaveatPolicy, type SponsorRequirements } from "./lis
  * JSON has no bigint, so price/quota/period/spendCap amounts are decimal strings here.
  */
 export interface PlanConfigFile {
-  profile: { name: string; region: string; relayerEndpoint: string };
+  /** Display identity + public node URL. Lives here (not in .env) so `plans:configure` is the single editor. */
+  profile: {
+    name: string;
+    region: string;
+    relayerEndpoint: string;
+    description?: string;
+    website?: string;
+    supportUrl?: string;
+  };
   plans: {
     name: string;
     region?: string;

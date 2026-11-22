@@ -9,100 +9,115 @@ wallet ──POST /relay──▶  your node ──▶ redeemDelegations (type-4
                          validate · simulate · broadcast · chargeUsage
 ```
 
-## Quick start
+Full command reference: **[COMMANDS.md](COMMANDS.md)**.
+
+## Go-live flow (URL first)
+
+Bring up a **reachable HTTPS endpoint**, then configure plans and register. Profile name/region live in `sponsor.plans.json`, not in `.env`.
+
+### 1. Machine + secrets
 
 ```bash
 git clone https://github.com/fee-market/relayer.git && cd relayer
+# VPS (once, as root): sudo bash scripts/vps/prepare.sh
 npm run setup
-cp .env.example .env          # or: npm run sponsor:init
-npm run sponsor:plans:configure
-npm run sponsor:onboard       # register + publish metadata → PENDING, then starts the node as a background service
-# ask the marketplace curator to verify you (node must stay up — systemd or Docker)
-npm run sponsor:go            # after VERIFIED: listPlan on-chain + (re)start
+npm run sponsor:init          # .env: relayer key, payout, RPC, IPFS key
+# fund the printed relayer address with POL
 ```
 
-**Verification vs running the process:** the HTTP node does **not** wait for VERIFIED. `sponsor:onboard` / `sponsor:serve` / `sponsor:ensure-running` keep it up in the background (Docker Compose, or systemd `feemarket-relayer`) so the curator can hit `/health`. What *does* require VERIFIED is on-chain `listPlan` (and thus `npm run sponsor:go`). Re-run `sponsor:onboard` to check status; when VERIFIED, run `sponsor:go`.
+### 2. Public URL (before plans / onboard)
 
-Dev: `npm run dev` then `curl localhost:8787/health`.
+Point DNS at this host, then terminate HTTPS and keep the process running:
 
-### VPS / tunnel
+```bash
+# Caddy + Docker
+npm run sponsor:serve
 
-| Path | Command |
-|------|---------|
-| Ubuntu VPS (full guided) | `sudo bash scripts/vps/prepare.sh` then `npm run sponsor:vps` |
-| Plans + HTTPS on this box | `npm run sponsor:plans:configure` (writes plans, syncs `.env`, can start the public endpoint) |
-| HTTPS (Caddy / Docker) | `npm run sponsor:serve` |
-| HTTPS (nginx or Apache) | `sudo bash scripts/vps/setup-proxy.sh nginx` — choose certbot / import PEM / self-signed / Cloudflare Flexible, then `npm run sponsor:serve` |
-| Validate public URL | `npm run sponsor:check-endpoint` — local + DNS + HTTPS; prints copyable Cloudflare / `.env` values |
-| Cloudflare Tunnel | `bash scripts/setup-tunnel.sh relay.yourdomain.com` |
+# or nginx / Apache (Certbot, import PEM, self-signed, or Cloudflare Flexible)
+sudo bash scripts/vps/setup-proxy.sh apache --domain node.example.com
+npm run sponsor:ensure-running
+
+npm run sponsor:check-endpoint   # local + DNS + HTTPS; copyable Cloudflare/.env values
+```
+
+Tunnel alternative: `bash scripts/setup-tunnel.sh node.example.com`.
+
+This sets `PUBLIC_DOMAIN` / `PUBLIC_RELAYER_URL` (no `/relay` path). The node should answer `https://your.domain/live` and `/health` while you wait for the curator.
+
+### 3. Plans + on-chain registration
+
+```bash
+npm run sponsor:plans:configure   # uses the URL from .env; writes sponsor.plans.json
+npm run sponsor:onboard           # register + metadata → PENDING; keeps node running
+npm run sponsor:status            # PENDING | VERIFIED | …
+# ask the marketplace curator to verify you
+npm run sponsor:go                # after VERIFIED: listPlan + start
+```
+
+**Verification:** the HTTP process does **not** require VERIFIED — keep it up so the curator can probe you. On-chain `listPlan` (and `sponsor:go`) **does** require VERIFIED.
+
+### Local dev
+
+```bash
+npm run setup && npm run sponsor:init
+npm run dev
+curl localhost:8787/health
+```
 
 ### Updating a live node
 
-Do **not** run bare `git pull` on the server — `npm install` often dirties `package-lock.json` and blocks the merge. Use:
-
 ```bash
-npm run update
-# or: bash scripts/update.sh
+npm run update    # not bare git pull
 ```
 
-That resets regenerable lockfile noise, `git pull --ff-only`, runs `npm ci`, then `docker compose up -d --build`. Your `.env`, `sponsor.plans.json`, `data/`, and `secrets/` are left alone. If you edited tracked source on the box, the script stops; pass `--force` only if you mean to discard those edits.
+Resets regenerable lockfile noise, `git pull --ff-only`, `npm ci`, then restarts Docker Compose or `feemarket-relayer.service`. Leaves `.env`, `sponsor.plans.json`, `data/`, and `secrets/` alone.
 
 ## Configuration
 
-Copy [`.env.example`](.env.example) — every variable is documented there. Minimum to run:
+Copy [`.env.example`](.env.example). Minimum:
 
 | Var | Purpose |
 |-----|---------|
 | `RPC_URL` | Paid Polygon RPC preferred |
 | `RELAYER_PRIVATE_KEY` | Hot key that pays gas (**fund it**) |
-| `FEE_MARKET_REGISTRY` + framework addresses | Defaults for Polygon are in `.env.example` |
-| `SPONSOR_ID` | Set by `sponsor:onboard` |
-| `DASHBOARD_TOKEN` | Optional; unlocks `/admin` |
+| Framework addresses | Defaults for Polygon in `.env.example` |
+| `PUBLIC_RELAYER_URL` / `PUBLIC_DOMAIN` | Set after HTTPS works |
+| `SPONSOR_ID` | Written by `sponsor:onboard` |
+| `SPONSOR_PAYOUT_ADDRESS` | Cold wallet for earnings |
+| `DASHBOARD_TOKEN` | Optional `/admin` |
 
-## Commands
+**Not in `.env`:** sponsor name, region, description, website, support URL, plan terms → `sponsor.plans.json` via `sponsor:plans:configure`.
 
-| Script | What it does |
-|--------|----------------|
-| `sponsor:init` | Write `.env`, generate relayer key |
-| `sponsor:plans:configure` | Profile + plans → `sponsor.plans.json`; syncs public URL; can start Caddy |
-| `sponsor:serve` | Start public HTTPS + keep the node running (Docker or systemd) |
-| `sponsor:ensure-running` | Start/restart background node (`feemarket-relayer` or Compose) |
-| `sponsor:proxy` | Install/configure host nginx or Apache + Certbot (`sudo npm run sponsor:proxy -- nginx`) |
-| `sponsor:check-endpoint` | External check of the node URL + copyable DNS/SSL/`.env` settings |
-| `sponsor:vps` | Full guided VPS setup (`scripts/vps/setup.sh`) |
-| `sponsor:onboard` | Register / publish metadata, then ensure the node is running for the curator |
-| `sponsor:go` | After VERIFIED: `listPlan` + start the node (`--no-start` = list only) |
-| `sponsor:doctor` | Read-only readiness check |
-| `sponsor:status` / `withdraw` / `rotate` / `accept` / `relayers` | Ops & key management |
-| `listing:gen` | Preview metadata + `listPlan` args (no txs) |
+## Common commands
+
+| Script | Role |
+|--------|------|
+| `sponsor:init` | Write `.env` + relayer key |
+| `sponsor:serve` / `ensure-running` | Public HTTPS + background node |
+| `sponsor:check-endpoint` | Validate public URL |
+| `sponsor:plans:configure` | Profile + plans → JSON |
+| `sponsor:onboard` | Register / metadata / keep node up |
+| `sponsor:status` / `doctor` | Status & readiness |
+| `sponsor:go` | After VERIFIED: list plans + start |
+
+See [COMMANDS.md](COMMANDS.md) for the full list (proxy, rotate, withdraw, tests, …).
 
 ## API
 
 | Endpoint | Role |
 |----------|------|
-| `GET /live` | Process up (container healthcheck) |
+| `GET /live` | Process up |
 | `GET /health` | Ready to sponsor (RPC + balance); `503` when not |
 | `POST /relay` | Redeem a sponsored user batch |
-| `POST /subscribe` | Bootstrap subscription (`[subscribe]` or `[approve, subscribe]`) |
-| `POST /topup` | Add escrow (`[topUp]` or `[approve, topUp]`) |
-| `GET /admin/` | Token-gated dashboard (`DASHBOARD_TOKEN`) |
+| `POST /subscribe` | Bootstrap subscription |
+| `POST /topup` | Add escrow |
+| `GET /admin/` | Token-gated dashboard |
 
-**`POST /relay` body (sketch):**
-
-```jsonc
-{
-  "subscriptionId": "1",
-  "delegations": [/* leaf→root, user-signed */],
-  "executionCallData": "0x…",
-  "authorization": {/* EIP-7702, first use only */}
-}
-```
-
-Common responses: `200` success · `422` validation/preflight · `429` rate limit · `503` busy/low balance · `504` sent, not yet confirmed (idempotent on retry).
+Common responses: `200` · `422` validation · `429` rate limit · `503` busy/low balance · `504` sent, not yet confirmed.
 
 ## Ops notes
 
 - Keep the relayer key hot with a **limited** balance; top up from cold storage.
-- Cap spend with `MAX_GAS_WEI` / `MAX_GAS_UNITS`; optional profit guard in `.env.example`.
-- One relayer key per process — do not share a key across load-balanced instances.
-- Publishing new metadata or rotating keys returns a VERIFIED sponsor to PENDING until re-verified.
+- Cap spend with `MAX_GAS_WEI` / `MAX_GAS_UNITS`.
+- One relayer key per process.
+- Publishing new metadata or rotating keys returns a VERIFIED sponsor to **PENDING** until re-verified.
