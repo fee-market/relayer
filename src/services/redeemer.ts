@@ -59,6 +59,15 @@ export interface PreflightResult {
   gas?: bigint;
   /** False when the redemption could not be simulated (first-use on an RPC that rejects state overrides). */
   simulated?: boolean;
+  /** Refused because the estimate is above the gas-unit ceiling (a setting the operator may need to raise). */
+  overUnitCap?: boolean;
+}
+
+/** A ceiling that would have let `gas` through with the usual 25% headroom, rounded up to the next 100k. */
+export function suggestedGasCap(gas: bigint): bigint {
+  const step = 100_000n;
+  const need = gas + gas / 4n;
+  return ((need + step - 1n) / step) * step;
 }
 
 /** Intrinsic cost of applying one EIP-7702 authorization, which eth_estimateGas on a plain call does not include. */
@@ -116,8 +125,11 @@ function isRevert(err: unknown): boolean {
  *  - The estimate (plus 25% headroom) becomes the transaction's own gas limit and is refused above MAX_GAS_UNITS, so
  *    a heavy user batch can neither slip past nor run away. MAX_GAS_WEI caps the estimated cost in the native token.
  */
-export async function preflight(req: ExecutionRequest): Promise<PreflightResult> {
-  const cap = config.policy.maxGasUnits;
+export async function preflight(
+  req: ExecutionRequest,
+  limit: { cap: bigint; name: string } = { cap: config.policy.maxGasUnits, name: "MAX_GAS_UNITS" },
+): Promise<PreflightResult> {
+  const cap = limit.cap;
   const data = encodeRedeemCalldata(req);
   const delegator = req.delegations[req.delegations.length - 1].delegator as Hex;
   const override = req.authorization
@@ -148,8 +160,8 @@ export async function preflight(req: ExecutionRequest): Promise<PreflightResult>
     }
   }
 
-  if (gas > cap) return { ok: false, reason: `gas estimate ${gas} exceeds this sponsor's limit of ${cap}`, gas };
-  const limit = gas + gas / 4n > cap ? cap : gas + gas / 4n;
+  if (gas > cap) return { ok: false, reason: `gas estimate ${gas} exceeds this sponsor's limit of ${cap} (${limit.name})`, gas, overUnitCap: true };
+  const gasLimit = gas + gas / 4n > cap ? cap : gas + gas / 4n;
 
   // Shared for a couple of seconds: a burst of requests prices off one read.
   const gasPrice = await cached("gasPrice", 2000, () => publicClient.getGasPrice());
@@ -157,7 +169,7 @@ export async function preflight(req: ExecutionRequest): Promise<PreflightResult>
   if (config.policy.maxGasWei > 0n && gasCostWei > config.policy.maxGasWei) {
     return { ok: false, reason: `gas cost ${gasCostWei} exceeds cap ${config.policy.maxGasWei}`, gasCostWei, gas };
   }
-  return { ok: true, gasCostWei, gas: limit, simulated };
+  return { ok: true, gasCostWei, gas: gasLimit, simulated };
 }
 
 /** Submit the type-4 (EIP-7702) redemption and wait for it. The sponsor pays gas. `gas` is the limit from preflight. */

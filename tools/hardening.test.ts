@@ -60,7 +60,7 @@ const { config } = await import("../src/config.js");
 const { validateBatchLimits } = await import("../src/services/batchValidation.js");
 const { validateAuthorization, delegationTargetOf } = await import("../src/services/authorization.js");
 const { checkUserCanPay } = await import("../src/services/payment.js");
-const { preflight } = await import("../src/services/redeemer.js");
+const { preflight, suggestedGasCap } = await import("../src/services/redeemer.js");
 
 let passed = 0;
 let total = 0;
@@ -186,6 +186,19 @@ await test("preflight: an estimate above MAX_GAS_UNITS is refused (a heavy batch
   const r = await preflight(plainReq as never);
   assert.equal(r.ok, false);
   assert.match(r.reason!, /exceeds this sponsor's limit of 600000/);
+});
+await test("preflight: a refusal names the setting to raise and flags it as a unit-cap refusal", async () => {
+  estimate = () => ({ result: "0x" + (649_281).toString(16) });
+  const r = await preflight(plainReq as never);
+  assert.equal(r.overUnitCap, true);
+  assert.match(r.reason!, /\(MAX_GAS_UNITS\)/);
+  assert.equal(suggestedGasCap(r.gas!), 900_000n); // 649,281 + 25% = 811,601, rounded up to the next 100k
+});
+await test("preflight: subscribe uses its own, higher ceiling", async () => {
+  estimate = () => ({ result: "0x" + (649_281).toString(16) });
+  const r = await preflight(plainReq as never, { cap: config.policy.maxGasUnitsSubscribe, name: "MAX_GAS_UNITS_SUBSCRIBE" });
+  assert.equal(r.ok, true);
+  assert.equal(r.gas, 811_601n);
 });
 await test("preflight: the limit never exceeds MAX_GAS_UNITS even with headroom", async () => {
   estimate = () => ({ result: "0x" + (550_000).toString(16) }); // +25% would be 687,500

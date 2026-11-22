@@ -125,6 +125,7 @@ async function main() {
       trustProxy: config.trustProxy,
       maxDelegationTtlSeconds: config.policy.maxDelegationTtlSeconds,
       maxGasUnits: config.policy.maxGasUnits,
+      maxGasUnitsSubscribe: config.policy.maxGasUnitsSubscribe,
       minRelayerBalanceWei: config.policy.minRelayerBalanceWei,
       alertWebhookUrl: config.policy.alertWebhookUrl,
       maxFeePerGasGwei: config.policy.maxFeePerGasGwei,

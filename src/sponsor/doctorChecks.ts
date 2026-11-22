@@ -61,6 +61,7 @@ export interface PolicyInput {
   maxDelegationTtlSeconds: number;
   // Added with the relayer hardening; optional so older callers and fixtures keep working.
   maxGasUnits?: bigint;
+  maxGasUnitsSubscribe?: bigint;
   minRelayerBalanceWei?: bigint;
   alertWebhookUrl?: string;
   maxFeePerGasGwei?: number;
@@ -90,7 +91,13 @@ export function lintPolicy(p: PolicyInput): Finding[] {
   else out.push(ok(`gas cap set (${p.maxGasWei} wei per redemption)`));
   if (p.maxGasUnits !== undefined) {
     if (p.maxGasUnits === 0n) out.push(fail("MAX_GAS_UNITS=0: nothing bounds the gas one user-built batch may burn; set a limit (default 600000)"));
+    else if (p.maxGasUnits < 400_000n) out.push(warn(`MAX_GAS_UNITS=${p.maxGasUnits} is tight: an ordinary sponsored send with its charge often needs 250-400k; 600000 is the default`));
     else out.push(ok(`gas limit per redemption is capped at ${p.maxGasUnits} units`));
+  }
+  if (p.maxGasUnitsSubscribe !== undefined) {
+    if (p.maxGasUnitsSubscribe < 800_000n) {
+      out.push(warn(`MAX_GAS_UNITS_SUBSCRIBE=${p.maxGasUnitsSubscribe}: a first subscribe (account upgrade + payment) can need 650k+, so new customers may be refused; 1200000 is the default`));
+    } else out.push(ok(`subscribe / top-up gas limit is ${p.maxGasUnitsSubscribe} units`));
   }
   if (p.rpcUrls !== undefined) {
     const published = !!p.publicRelayerUrl && !p.publicRelayerUrl.includes("example");

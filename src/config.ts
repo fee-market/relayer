@@ -146,6 +146,9 @@ export const config = {
     // Hard ceiling on gas units for one redemption. It is also set as the transaction's own gas limit, so a
     // user-crafted heavy batch can never consume more than this, whatever the simulation said.
     maxGasUnits: BigInt(env("MAX_GAS_UNITS", "600000")),
+    // The same ceiling for /subscribe and /topup. Their batch shape is fixed and validated (one registry call for
+    // this sponsor's plan), and a first subscribe also installs the account upgrade, so they need more than a /relay.
+    maxGasUnitsSubscribe: BigInt(env("MAX_GAS_UNITS_SUBSCRIBE", "1200000")),
     // A sponsored batch is one charged operation however much it does, so bound what one batch may contain:
     // number of calls (including the final chargeUsage) and total calldata bytes.
     maxBatchCalls: Number(env("MAX_BATCH_CALLS", "8")),

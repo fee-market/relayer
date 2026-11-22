@@ -5,7 +5,8 @@ import { validateRelayRequest } from "./services/validator.js";
 import { validateSubscribeRequest } from "./services/subscribeValidator.js";
 import { validateTopUpRequest } from "./services/topUpValidator.js";
 import { validateAuthorization } from "./services/authorization.js";
-import { findSubscriptionId, preflight, redeemAndConfirm, relayerAddress } from "./services/redeemer.js";
+import { findSubscriptionId, preflight, redeemAndConfirm, relayerAddress, suggestedGasCap } from "./services/redeemer.js";
+import { alert } from "./services/alerts.js";
 import { FeeTooHighError, ReceiptTimeoutError, adoptPersisted, inflightCount } from "./lib/txManager.js";
 import { readiness, setDraining } from "./services/guard.js";
 import { gate } from "./services/abuse.js";
@@ -149,8 +150,20 @@ async function executeSponsored(res: Response, req: ExecutionRequest, ctx: Ctx) 
   const auth = await validateAuthorization(req);
   if (!auth.ok) return reject(422, auth.reason);
 
-  const pf = await preflight(req);
-  if (!pf.ok) return reject(422, pf.reason ?? "simulation failed");
+  const limit = ctx.label === "redemption"
+    ? { cap: config.policy.maxGasUnits, name: "MAX_GAS_UNITS" }
+    : { cap: config.policy.maxGasUnitsSubscribe, name: "MAX_GAS_UNITS_SUBSCRIBE" };
+  const pf = await preflight(req, limit);
+  if (!pf.ok) {
+    if (pf.overUnitCap && pf.gas !== undefined) {
+      alert(
+        `gas-units:${limit.name}`,
+        `A ${ctx.label} needed ${pf.gas} gas, above ${limit.name}=${limit.cap}, and was refused. If this is a normal action, ` +
+          `set ${limit.name}=${suggestedGasCap(pf.gas)} in .env and run \`npm run sponsor:ensure-running\`. MAX_GAS_WEI still caps the cost.`,
+      );
+    }
+    return reject(422, pf.reason ?? "simulation failed");
+  }
 
   const profit = await profitCheck(ctx.plan, pf.gasCostWei!);
   if (!profit.ok) {
