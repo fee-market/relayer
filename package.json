@@ -32,6 +32,7 @@
     "e2e:topup": "tsx tools/topUpViaEndpoint.ts",
     "typecheck": "tsc --noEmit",
     "test:charge": "tsx tools/charge.test.ts",
+    "sponsor:setup": "bash scripts/vps/setup.sh",
     "sponsor:init": "tsx src/sponsor/init.ts",
     "sponsor:plans:configure": "tsx tools/configurePlans.ts",
     "sponsor:serve": "bash scripts/serve-public.sh",

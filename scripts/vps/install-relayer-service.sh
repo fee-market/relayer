@@ -40,6 +40,16 @@ if [ -z "$NODE_USER" ]; then
 fi
 [ -n "$NODE_USER" ] || die "Could not detect file owner; pass --user"
 id "$NODE_USER" >/dev/null 2>&1 || die "User not found: $NODE_USER"
+# The .env holds the relayer key; the node must not run as root (a root-owned clone usually means the
+# setup was started from /root — the node user's copy is the one to serve from).
+if [ "$NODE_USER" = root ]; then
+  hint=""
+  if [ -f /etc/feemarket/prepare.env ]; then
+    t=$(env_get /etc/feemarket/prepare.env TARGET)
+    if [ -n "$t" ]; then hint=" Use the node user copy instead: $t"; fi
+  fi
+  die "Refusing to run the node as root (checkout $RELAY_DIR is root-owned).$hint"
+fi
 
 NODE_BIN=$(command -v node || true)
 [ -n "$NODE_BIN" ] || die "node not on PATH for root — install Node.js LTS first (prepare.sh)"

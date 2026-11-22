@@ -437,7 +437,10 @@ elif { [ -z "$NODE" ] || [ "$NODE" -lt "$NODE_MIN_MAJOR" ]; } && [ "$needs_host_
 fi
 
 # Optional host reverse proxy (nginx / Apache) — Ubuntu packages + Certbot.
-if [ "${PUBLISH_MODE:-}" = nginx ] || [ "${PUBLISH_MODE:-}" = apache ]; then
+# Under the unified `setup.sh`, the proxy is configured later from the node user's copy of the repo.
+if [ "${FEEMARKET_SETUP:-0}" = 1 ]; then
+  :
+elif [ "${PUBLISH_MODE:-}" = nginx ] || [ "${PUBLISH_MODE:-}" = apache ]; then
   section "HTTPS proxy: $PUBLISH_MODE"
   note "Installs the Ubuntu $PUBLISH_MODE package (security updates via apt) and Certbot for Let's Encrypt."
   note "The Node process will listen on 127.0.0.1 only; $PUBLISH_MODE terminates HTTPS on 80/443."
@@ -483,13 +486,18 @@ if [ "$DRY" -eq 1 ]; then
   exit 0
 fi
 
-HINT_DOMAIN=node.example.com
-if [ -f "$ENV_FILE" ]; then
-  d=$(env_get "$ENV_FILE" PUBLIC_DOMAIN)
-  [ -n "$d" ] && HINT_DOMAIN=$d
-elif [ -f "$TARGET/.env" ]; then
-  d=$(env_get "$TARGET/.env" PUBLIC_DOMAIN)
-  [ -n "$d" ] && HINT_DOMAIN=$d
+# Handoff for scripts/vps/setup.sh, which continues as $NODE_USER from $TARGET.
+install -d -m 0755 /etc/feemarket
+cat >/etc/feemarket/prepare.env <<EOF
+NODE_USER=$NODE_USER
+TARGET=$TARGET
+PUBLISH_MODE=${PUBLISH_MODE:-docker}
+SSH_PORT=$SSH_PORT
+EOF
+chmod 644 /etc/feemarket/prepare.env
+if [ "${FEEMARKET_SETUP:-0}" = 1 ]; then
+  ok "Server is prepared; continuing the setup as $NODE_USER"
+  exit 0
 fi
 
 NODE=$(node_major)
@@ -507,31 +515,6 @@ say "Next, as $NODE_USER (fresh login so docker group / PATH apply):"
 printf '\n     ssh -p %s %s@%s\n' "$SSH_PORT" "$NODE_USER" "$(public_ipv4 || true)"
 printf '     # or from root: su - %s\n' "$NODE_USER"
 printf '     cd %s\n' "$TARGET"
-printf '     node -v && npm -v\n'
-printf '     bash scripts/vps/check.sh --domain %s\n' "$HINT_DOMAIN"
-case "${PUBLISH_MODE:-docker}" in
-  nginx | apache)
-    printf '     npm run setup\n'
-    printf '     npm run sponsor:init\n'
-    printf '     npm run sponsor:plans:configure\n'
-    printf '     # proxy already done if you accepted it above; else:\n'
-    printf '     #   sudo bash scripts/vps/setup-proxy.sh %s --domain %s\n' "$PUBLISH_MODE" "$HINT_DOMAIN"
-    printf '     npm run build && HOST=127.0.0.1 npm start\n'
-    printf '     bash scripts/vps/check-endpoint.sh %s\n\n' "$HINT_DOMAIN"
-    note "$PUBLISH_MODE stays patched via apt. Renewals: certbot systemd timer."
-    ;;
-  bare)
-    printf '     npm run setup && npm run sponsor:init && npm run sponsor:plans:configure\n'
-    printf '     npm run build && HOST=0.0.0.0 npm start\n\n'
-    ;;
-  tunnel)
-    printf '     npm run setup && npm run sponsor:init && npm run sponsor:plans:configure\n'
-    printf '     npm run build && npm start\n'
-    printf '     bash scripts/setup-tunnel.sh %s\n\n' "$HINT_DOMAIN"
-    ;;
-  *)
-    printf '     bash scripts/vps/setup.sh                              # guided Docker + Caddy setup\n\n'
-    note "Before setup.sh: A record for your domain → this server; have RPC URL and payout address ready."
-    ;;
-esac
-note "Do not run npm run update until the node is set up once. Later upgrades: cd $TARGET && npm run update"
+printf '     npm run sponsor:setup        # everything else: .env, HTTPS, plans, registration, status\n\n'
+note "Next time, run the whole thing as one command from root: sudo bash scripts/vps/setup.sh"
+note "Have ready: a domain (A record → this server), a Polygon RPC URL, a payout address, a thirdweb key."

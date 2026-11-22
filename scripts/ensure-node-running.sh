@@ -81,9 +81,16 @@ install_and_start_systemd() {
   env_set "$ENV_FILE" HOST "$HOST"
   env_set "$ENV_FILE" PORT "$PORT"
 
-  if systemctl list-unit-files feemarket-relayer.service 2>/dev/null | grep -q feemarket-relayer; then
+  local unit_dir unit_user
+  unit_dir=$(systemctl show -p WorkingDirectory --value feemarket-relayer.service 2>/dev/null || true)
+  unit_user=$(systemctl show -p User --value feemarket-relayer.service 2>/dev/null || true)
+  if systemctl list-unit-files feemarket-relayer.service 2>/dev/null | grep -q feemarket-relayer &&
+    [ "$unit_dir" = "$ROOT" ] && [ "$unit_user" = "$owner" ]; then
     ok "systemd unit feemarket-relayer already installed"
   else
+    if [ -n "$unit_dir" ] && [ "$unit_dir" != "$ROOT" ]; then
+      warn "feemarket-relayer.service runs ${unit_user:-?} from $unit_dir" "Re-pointing it at $ROOT as $owner"
+    fi
     note "Installing systemd unit (survives logout + reboot)…"
     if ! run_as_root bash "$ROOT/scripts/vps/install-relayer-service.sh" --user "$owner" --dir "$ROOT"; then
       return 1
@@ -119,7 +126,7 @@ start_nohup_fallback() {
 
 # Decide mode
 case "$PROXY" in
-  nginx | apache | bare)
+  nginx | apache | bare | tunnel)
     if install_and_start_systemd; then
       exit 0
     fi

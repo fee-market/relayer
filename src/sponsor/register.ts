@@ -102,13 +102,30 @@ async function listPlans() {
 }
 
 async function status() {
+  const labels = ["UNVERIFIED", "PENDING", "VERIFIED", "REVOKED"];
+  // --short: one word for scripts, looked up by relayer address so a placeholder SPONSOR_ID can't report someone else.
+  if (process.argv.includes("--short")) {
+    const id = (await publicClient.readContract({
+      address: config.feeMarketRegistry,
+      abi: feeMarketRegistryAbi,
+      functionName: "relayerToSponsor",
+      args: [relayerAddress],
+    })) as bigint;
+    if (id === 0n) return void console.log("NOT_REGISTERED");
+    const s = (await publicClient.readContract({
+      address: config.feeMarketRegistry,
+      abi: feeMarketRegistryAbi,
+      functionName: "sponsors",
+      args: [id],
+    })) as readonly [string, string, string, number, boolean];
+    return void console.log(labels[s[3]] ?? String(s[3]));
+  }
   const base = { address: config.feeMarketRegistry, abi: feeMarketRegistryAbi, args: [config.sponsorId] } as const;
   const [s, committed, verified] = await Promise.all([
     publicClient.readContract({ ...base, functionName: "sponsors" }),
     publicClient.readContract({ ...base, functionName: "metadataHash" }),
     publicClient.readContract({ ...base, functionName: "verifiedMetadataHash" }),
   ]);
-  const labels = ["UNVERIFIED", "PENDING", "VERIFIED", "REVOKED"];
   console.log({
     payout: s[0],
     relayer: s[1],

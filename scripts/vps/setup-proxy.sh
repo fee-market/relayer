@@ -29,6 +29,7 @@ TLS_MODE=""
 CERT_FILE=""
 KEY_FILE=""
 CHAIN_FILE=""
+ORIG_ARGS=("$@")
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -53,6 +54,15 @@ done
 [ -n "$KIND" ] || die "Usage: sudo bash scripts/vps/setup-proxy.sh nginx|apache [options]"
 
 require_tty
+
+# Started from a root-owned clone (e.g. /root/relayer) while the node user has its own copy: configure that one.
+if [ "$(file_owner "$RELAYER_DIR")" = root ] && [ -f /etc/feemarket/prepare.env ]; then
+  T=$(env_get /etc/feemarket/prepare.env TARGET)
+  if [ -n "$T" ] && [ "$T" != "$RELAYER_DIR" ] && [ -f "$T/scripts/vps/setup-proxy.sh" ]; then
+    warn "This checkout ($RELAYER_DIR) belongs to root" "Switching to the node user's copy: $T"
+    exec bash "$T/scripts/vps/setup-proxy.sh" "${ORIG_ARGS[@]}"
+  fi
+fi
 cd "$RELAYER_DIR"
 
 TLS_DIR=/etc/feemarket/tls

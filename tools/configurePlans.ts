@@ -19,6 +19,8 @@ import { PLAN_CONFIG_PATH, type PlanConfigFile } from "../src/sponsor/planConfig
 import { publishedUrlProblem } from "../src/sponsor/flow.js";
 
 const USDC_POLYGON = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
+// --no-endpoint: the caller (scripts/vps/setup.sh) already brought HTTPS up and keeps the node running.
+const NO_ENDPOINT = process.argv.includes("--no-endpoint");
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ENV_PATH = join(ROOT, ".env");
 const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -223,6 +225,11 @@ async function main() {
   const out: PlanConfigFile = { profile, plans };
   writeFileSync(PLAN_CONFIG_PATH, JSON.stringify(out, null, 2) + "\n");
   console.log(`\n✓ wrote ${PLAN_CONFIG_PATH.pathname} (${plans.length} plan${plans.length === 1 ? "" : "s"})`);
+
+  if (NO_ENDPOINT) {
+    rl.close();
+    return;
+  }
 
   console.log("\n── HTTPS / keep node running (optional if already up) ──");
   if (await askYesNo("Configure or refresh the public endpoint on this machine now?", !usableEnvUrl)) {

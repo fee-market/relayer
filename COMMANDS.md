@@ -4,7 +4,19 @@ How to bring up a fee.market sponsor node: get a **live public URL first**, then
 
 ---
 
-## Recommended flow
+## One command
+
+```bash
+sudo bash scripts/vps/setup.sh       # fresh Ubuntu VPS (prepares as root, continues as the node user)
+npm run sponsor:setup                # node user, server already prepared
+npm run sponsor:setup -- --go-live   # only the status / go-live step
+```
+
+It runs every step below in order, checks first whether each one is already done, and stays open with options when something fails (DNS, certificate, endpoint). After the curator verifies you, run it again and it lists your plans. `sponsor:vps` is the same command under its old name.
+
+If you clone as root, the root part copies the repo to `/home/<node user>/relayer` and moves over any `.env`, `sponsor.plans.json`, or `secrets/` already in the root clone. Everything afterwards, including the systemd service, runs as the node user from that copy. Run later commands there (`sudo -iu sponsor`, then `cd ~/relayer`); the root clone can be deleted.
+
+## The flow it runs (or do it by hand)
 
 ```text
 1. Server + deps     prepare.sh / setup / Node LTS
@@ -32,7 +44,7 @@ How to bring up a fee.market sponsor node: get a **live public URL first**, then
 | `npm run sponsor:init` | Create `.env` (relayer key, payout, optional public URL / thirdweb). Does **not** set profile name. |
 | `npm run sponsor:plans:configure` | Interactive `sponsor.plans.json`: public URL, name, region, optional description/website/support, plans. Syncs `PUBLIC_*` into `.env`. Can refresh HTTPS. |
 | `npm run sponsor:onboard` | Register (or reuse), publish metadata, publish endpoint if needed; then **ensure the node is running** for the curator. Idempotent; re-run to see status. |
-| `npm run sponsor:status` | Print on-chain status: `UNVERIFIED` / `PENDING` / `VERIFIED` / `REVOKED`. |
+| `npm run sponsor:status` | Print on-chain status: `UNVERIFIED` / `PENDING` / `VERIFIED` / `REVOKED`. `-- --short` prints only the word. |
 | `npm run sponsor:doctor` | Read-only readiness (RPC, balance, registry, config). |
 | `npm run sponsor:go` | **After VERIFIED:** `listPlan` on-chain, then start node (Docker or foreground). `--no-start` = list only. `--dry-run` = print plan. |
 | `npm run update` | Safe VPS upgrade (`git pull` + `npm ci` + restart Compose or systemd). Prefer over bare `git pull`. |
@@ -47,8 +59,9 @@ How to bring up a fee.market sponsor node: get a **live public URL first**, then
 | `npm run sponsor:ensure-running` | Start/restart background node (Compose or systemd; nohup fallback). |
 | `npm run sponsor:proxy` | `sudo` helper → `scripts/vps/setup-proxy.sh` (nginx\|apache, certbot / import / self-signed / CF Flexible). Installs TLS + starts `feemarket-relayer`. |
 | `npm run sponsor:check-endpoint` | Local `/live`, DNS, public HTTPS; optional `--print-settings` for Cloudflare / `.env` copy-paste. |
-| `npm run sponsor:vps` | Guided Docker+Caddy setup (`scripts/vps/setup.sh`). After verify: `--go-live`. |
-| `bash scripts/vps/prepare.sh` | Root once: user, SSH, firewall, Docker/Node, optional proxy, copy repo to sponsor home. |
+| `npm run sponsor:setup` / `sponsor:vps` | The one-command setup above (`scripts/vps/setup.sh`). |
+| `bash scripts/vps/prepare.sh` | Root part only: user, SSH, firewall, Docker/Node, copy repo to the node user. `setup.sh` runs it for you. |
+| `bash scripts/vps/install-relayer-service.sh` | Root: install the `feemarket-relayer` systemd unit (used by proxy / ensure-running). |
 | `bash scripts/setup-tunnel.sh <domain>` | Cloudflare Tunnel (+ optional user systemd unit). |
 
 **Background process**

@@ -11,7 +11,36 @@ wallet ──POST /relay──▶  your node ──▶ redeemDelegations (type-4
 
 Full command reference: **[COMMANDS.md](COMMANDS.md)**.
 
-## Go-live flow (URL first)
+## Setup in one command
+
+On a fresh Ubuntu VPS, as root:
+
+```bash
+git clone https://github.com/fee-market/relayer.git && cd relayer
+sudo bash scripts/vps/setup.sh
+```
+
+If the server is already prepared, run it as the node user instead: `npm run sponsor:setup`.
+
+**Cloned as root?** That's expected. The root part copies the repo to `/home/<node user>/relayer`, owned by that user, and continues there. If the root clone already holds a `.env`, `sponsor.plans.json`, or `secrets/`, they're moved over. From then on the node runs only from the node user's copy (never as root), and the `/root` clone can be deleted. If an older systemd unit still points at the root clone, `sponsor:ensure-running` re-points it automatically. Later commands run as that user: `sudo -iu sponsor`, then `cd ~/relayer`.
+
+It walks through everything in order, and you can re-run it at any point because it picks up where it left off:
+
+1. Server hardening, Docker, and Node LTS (root part, via `prepare.sh`), then it switches to the node user.
+2. Installs packages and builds the node.
+3. Writes `.env` (domain, payout address, RPC, thirdweb key).
+4. Shows the relayer address and waits until it's funded.
+5. Asks how wallets reach the node (Caddy/Docker, nginx, Apache, or Cloudflare Tunnel).
+6. Brings up public HTTPS, keeps the node running in the background, and checks the URL. If the check fails, it stays open with retry options.
+7. Asks for your profile and plans (`sponsor.plans.json`).
+8. Registers you on Polygon (shows a dry run first and asks you to confirm).
+9. Shows your status. If you're PENDING, it prints the details to send the curator and can wait for you. Once you're VERIFIED, it lists your plans and you're live.
+
+Run it again after the curator verifies you, or jump straight to that step with `npm run sponsor:setup -- --go-live`.
+
+The steps below are the same flow, done by hand.
+
+## Manual flow (URL first)
 
 Bring up a **reachable HTTPS endpoint**, then configure plans and register. Profile name/region live in `sponsor.plans.json`, not in `.env`.
 
@@ -92,6 +121,7 @@ Copy [`.env.example`](.env.example). Minimum:
 
 | Script | Role |
 |--------|------|
+| `sponsor:setup` | **Everything, in order, resumable** (root: `sudo bash scripts/vps/setup.sh`) |
 | `sponsor:init` | Write `.env` + relayer key |
 | `sponsor:serve` / `ensure-running` | Public HTTPS + background node |
 | `sponsor:check-endpoint` | Validate public URL |
