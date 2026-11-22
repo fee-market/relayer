@@ -154,6 +154,8 @@ env_get() {
 # env_set FILE KEY VALUE: replaces the first KEY= line or appends one. The value never appears in a command line.
 env_set() {
   local file=$1 tmp
+  # Unchanged values leave the file (and its mtime) alone: ensure-node-running restarts the node when .env is newer.
+  if [ -f "$file" ] && grep -qxF "$2=$3" "$file"; then return 0; fi
   tmp=$(mktemp "${file}.XXXXXX") || die "Cannot write next to $file"
   chmod 600 "$tmp"
   if KEY="$2" VALUE="$3" awk '

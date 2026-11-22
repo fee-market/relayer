@@ -108,6 +108,13 @@ generate_self_signed() {
   ok "Generated self-signed cert for $DOMAIN (825 days)"
 }
 
+# A cert + key already in place, valid for 30 more days and issued for this domain.
+existing_cert_ok() {
+  [ -s "$FULLCHAIN" ] && [ -s "$PRIVKEY" ] || return 1
+  openssl x509 -in "$FULLCHAIN" -noout -checkend 2592000 >/dev/null 2>&1 || return 1
+  openssl x509 -in "$FULLCHAIN" -noout -text 2>/dev/null | grep -qF "DNS:$DOMAIN"
+}
+
 choose_tls_mode() {
   # Pass "force" to re-prompt even when TLS_MODE is already set.
   if [ -n "$TLS_MODE" ] && [ "${1:-}" != force ]; then return 0; fi
@@ -206,10 +213,14 @@ prepare_certificate_material() {
       note "Cloudflare: use SSL/TLS mode Full (strict), or temporarily grey-cloud for issuance."
       ;;
     import)
-      import_certificate
+      if [ -z "$CERT_FILE" ] && existing_cert_ok && confirm "Keep the certificate already in $TLS_DIR?" y; then
+        ok "Keeping $FULLCHAIN"
+      else
+        import_certificate
+      fi
       ;;
     selfsigned)
-      generate_self_signed
+      if existing_cert_ok; then ok "Keeping the self-signed certificate in $TLS_DIR"; else generate_self_signed; fi
       note "In Cloudflare set SSL/TLS to Full (not Flexible, not Full strict)."
       ;;
     cf-flexible)
@@ -225,10 +236,10 @@ prepare_certificate_material() {
 run_certbot_once() {
   case "$KIND" in
     nginx)
-      certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect
+      certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect --keep-until-expiring
       ;;
     apache)
-      certbot --apache -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect
+      certbot --apache -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect --keep-until-expiring
       ;;
   esac
 }

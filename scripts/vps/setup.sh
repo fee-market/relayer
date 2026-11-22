@@ -267,9 +267,33 @@ fund_relayer() {
 }
 
 # ---- How wallets reach this node ----
+# Switching from one way of publishing to another: stop the old one so both don't fight over :80/:443.
+retire_publish_mode() {
+  warn "Switching from $1 to $KIND" "Stopping the $1 setup first"
+  case "$1" in
+    caddy) docker compose down || true ;;
+    nginx)
+      sudo rm -f /etc/nginx/sites-enabled/feemarket-relayer && sudo systemctl reload nginx 2>/dev/null || true
+      if [ "$KIND" = caddy ]; then note "If nginx serves nothing else: sudo systemctl disable --now nginx (Caddy needs :80/:443)"; fi
+      ;;
+    apache)
+      sudo a2dissite feemarket-relayer >/dev/null 2>&1 && sudo systemctl reload apache2 2>/dev/null || true
+      if [ "$KIND" = caddy ]; then note "If Apache serves nothing else: sudo systemctl disable --now apache2 (Caddy needs :80/:443)"; fi
+      ;;
+    tunnel) note "Stop the old tunnel if you no longer use it: sudo systemctl disable --now cloudflared" ;;
+  esac
+  if [ "$KIND" = caddy ] && systemctl list-unit-files feemarket-relayer.service 2>/dev/null | grep -q feemarket-relayer; then
+    sudo systemctl disable --now feemarket-relayer.service || true
+    ok "Stopped the host service feemarket-relayer (the node now runs in Docker)"
+  fi
+  # A new proxy means a new TLS choice.
+  set_env TLS_MODE ""
+}
+
 choose_publish_mode() {
   local c
   KIND=$(lower "$(get_env PROXY_KIND)")
+  OLD_KIND=$KIND
   if [ -z "$KIND" ]; then
     case "${PUBLISH_MODE:-}" in
       docker) KIND=caddy ;;
@@ -298,6 +322,7 @@ choose_publish_mode() {
       KIND=""
     fi
   done
+  if [ -n "$OLD_KIND" ] && [ "$OLD_KIND" != "$KIND" ]; then retire_publish_mode "$OLD_KIND"; fi
   set_env PROXY_KIND "$KIND"
   set_env TRUST_PROXY 1
   case "$KIND" in
@@ -428,6 +453,11 @@ register() {
     ok "Registration and metadata are already up to date"
     return 0
   fi
+  if ! printf '%s\n' "$out" | grep '^ • ' | grep -vq 'publish-endpoint'; then
+    ok "Registration and metadata are already up to date"
+    publish_endpoint_hint
+    return 0
+  fi
   say ""
   note "The real run sends transactions on Polygon mainnet from the relayer key: it registers you and commits your metadata."
   note "It costs a little POL in gas and cannot be undone, only changed later."
@@ -458,7 +488,10 @@ handoff() {
   note "The node keeps running in the background so the curator can open https://$DOMAIN/health."
 }
 
+ENDPOINT_HINT_SHOWN=0
 publish_endpoint_hint() {
+  if [ "$ENDPOINT_HINT_SHOWN" -eq 1 ]; then return; fi
+  ENDPOINT_HINT_SHOWN=1
   if ! sponsor sponsor:onboard -- --dry-run 2>/dev/null | grep -q 'publish-endpoint'; then
     ok "The endpoint stored on chain matches https://$DOMAIN"
     return
@@ -474,7 +507,16 @@ publish_endpoint_hint() {
 }
 
 go_live() {
-  local a
+  local a check
+  check=$(sponsor sponsor:list -- --check 2>/dev/null || true)
+  if printf '%s\n' "$check" | grep -q '^TO_LIST=0$'; then
+    ok "VERIFIED and all your plans are listed: nothing to send"
+    bash "$RELAYER_DIR/scripts/ensure-node-running.sh" || true
+    publish_endpoint_hint
+    ok "Live: wallets can subscribe to your plans at https://$DOMAIN"
+    return 0
+  fi
+  printf '%s\n' "$check" | grep '^· not listed yet' || true
   say "You are VERIFIED. Going live lists your plans on Polygon (transactions from the relayer key)."
   if ! sponsor sponsor:go -- --no-start --dry-run; then
     warn "Not ready yet (see above)"

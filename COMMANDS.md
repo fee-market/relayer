@@ -14,6 +14,16 @@ npm run sponsor:setup -- --go-live   # only the status / go-live step
 
 It runs every step below in order, checks first whether each one is already done, and stays open with options when something fails (DNS, certificate, endpoint). After the curator verifies you, run it again and it lists your plans. `sponsor:vps` is the same command under its old name.
 
+Running it again on a finished node is safe, and nothing is sent unless something actually changed:
+- `.env`, your domain, and the relayer key are kept.
+- A URL that already works is left alone.
+- The node service is restarted only if the build or `.env` changed since it last started.
+- Plans are kept unless you choose to edit them.
+- Registration is skipped when your on-chain data matches.
+- If you're VERIFIED and every plan is listed, it just confirms you're live.
+
+Choosing a different publishing method (e.g. nginx → Caddy) shuts down the old one first. Re-running the HTTPS setup keeps a valid certificate instead of requesting a new one.
+
 If you clone as root, the root part copies the repo to `/home/<node user>/relayer` and moves over any `.env`, `sponsor.plans.json`, or `secrets/` already in the root clone. Everything afterwards, including the systemd service, runs as the node user from that copy. Run later commands there (`sudo -iu sponsor`, then `cd ~/relayer`); the root clone can be deleted.
 
 ## The flow it runs (or do it by hand)

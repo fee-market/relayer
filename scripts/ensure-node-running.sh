@@ -49,6 +49,20 @@ wait_live() {
   return 1
 }
 
+dist_sum() {
+  [ -d "$ROOT/dist" ] || return 0
+  find "$ROOT/dist" -type f -name '*.js' -print0 | sort -z | xargs -0 cat 2>/dev/null | cksum
+}
+
+env_newer_than_service() {
+  local started env_m
+  started=$(systemctl show -p ActiveEnterTimestamp --value feemarket-relayer.service 2>/dev/null || true)
+  [ -n "$started" ] || return 0
+  started=$(date -d "$started" +%s 2>/dev/null) || return 0
+  env_m=$(stat -c %Y "$ENV_FILE" 2>/dev/null) || return 1
+  [ "$env_m" -gt "$started" ]
+}
+
 run_as_root() {
   if [ "$(id -u)" -eq 0 ]; then
     "$@"
@@ -75,13 +89,16 @@ install_and_start_systemd() {
   owner=$(file_owner "$ROOT")
   owner=${owner:-$(id -un)}
 
+  local stamp="$ROOT/data/.service-dist.sum" running="" built
+  [ -f "$stamp" ] && running=$(cat "$stamp")
   note "Building…"
-  npm run build
+  npm run --silent build
+  built=$(dist_sum)
 
   env_set "$ENV_FILE" HOST "$HOST"
   env_set "$ENV_FILE" PORT "$PORT"
 
-  local unit_dir unit_user
+  local unit_dir unit_user reinstalled=0
   unit_dir=$(systemctl show -p WorkingDirectory --value feemarket-relayer.service 2>/dev/null || true)
   unit_user=$(systemctl show -p User --value feemarket-relayer.service 2>/dev/null || true)
   if systemctl list-unit-files feemarket-relayer.service 2>/dev/null | grep -q feemarket-relayer &&
@@ -95,11 +112,19 @@ install_and_start_systemd() {
     if ! run_as_root bash "$ROOT/scripts/vps/install-relayer-service.sh" --user "$owner" --dir "$ROOT"; then
       return 1
     fi
+    reinstalled=1
   fi
 
+  # A live node is only restarted for a reason: new unit, new build, or .env edited since it started.
+  if [ "$reinstalled" -eq 0 ] && [ "$running" = "$built" ] && systemctl is-active --quiet feemarket-relayer.service &&
+    live_ok && ! env_newer_than_service; then
+    ok "feemarket-relayer.service is already running (nothing changed, not restarted)"
+    return 0
+  fi
   if ! run_as_root systemctl restart feemarket-relayer.service; then
     return 1
   fi
+  mkdir -p "$ROOT/data" && printf '%s\n' "$built" >"$stamp"
   run_as_root systemctl enable feemarket-relayer.service >/dev/null 2>&1 || true
   ok "feemarket-relayer.service active"
   wait_live

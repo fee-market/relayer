@@ -83,6 +83,15 @@ async function existingActivePlanKeys(): Promise<Set<string>> {
 async function listPlans() {
   await assertVerified();
   const existing = await existingActivePlanKeys();
+  // --check: report how many plans still need listing (`TO_LIST=<n>`), send nothing.
+  if (process.argv.includes("--check")) {
+    const missing = PLANS.filter((req) => {
+      const a = generateListing(config.sponsorId, req).listPlanArgs;
+      return !existing.has(planKey(a));
+    });
+    for (const req of missing) console.log(`· not listed yet: "${req.name}"`);
+    return void console.log(`TO_LIST=${missing.length}`);
+  }
   for (const req of PLANS) {
     const gen = generateListing(config.sponsorId, req);
     const { model, paymentToken, price, quota, period, caveatsHash } = gen.listPlanArgs;
