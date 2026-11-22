@@ -1,4 +1,4 @@
-import { toFunctionSelector } from "viem";
+import { formatEther, toFunctionSelector } from "viem";
 
 export type Level = "ok" | "warn" | "fail";
 export interface Finding {
@@ -87,8 +87,8 @@ export function lintPolicy(p: PolicyInput): Finding[] {
   else out.push(ok("delegations must be locked to this relayer"));
   if (!p.simulateBeforeSend) out.push(warn("SIMULATE_BEFORE_SEND=false: reverting redemptions will cost you gas"));
   else out.push(ok("redemptions are simulated before sending"));
-  if (p.maxGasWei === 0n) out.push(warn("MAX_GAS_WEI=0: no cap on what one redemption can cost you; set one from your fee math"));
-  else out.push(ok(`gas cap set (${p.maxGasWei} wei per redemption)`));
+  if (p.maxGasWei === 0n) out.push(warn("MAX_GAS_POL=0: no cap on what one redemption can cost you; set one from your fee math (e.g. 0.1)"));
+  else out.push(ok(`gas cost cap set (${formatEther(p.maxGasWei)} POL per redemption)`));
   if (p.maxGasUnits !== undefined) {
     if (p.maxGasUnits === 0n) out.push(fail("MAX_GAS_UNITS=0: nothing bounds the gas one user-built batch may burn; set a limit (default 600000)"));
     else if (p.maxGasUnits < 400_000n) out.push(warn(`MAX_GAS_UNITS=${p.maxGasUnits} is tight: an ordinary sponsored send with its charge often needs 250-400k; 600000 is the default`));
@@ -120,8 +120,8 @@ export function lintPolicy(p: PolicyInput): Finding[] {
   if (p.maxConcurrentSponsored !== undefined && p.maxConcurrentSponsored === 0) out.push(warn("MAX_CONCURRENT_SPONSORED=0: unbounded concurrency; a burst can pile up requests and RPC calls without limit"));
   if (p.maxFeePerGasGwei !== undefined && p.maxFeePerGasGwei === 0) out.push(warn("MAX_FEE_PER_GAS_GWEI=0: the node will pay any network fee during a spike; set a ceiling"));
   if (p.minRelayerBalanceWei !== undefined) {
-    if (p.minRelayerBalanceWei === 0n) out.push(warn("MIN_RELAYER_BALANCE_WEI=0: the node keeps accepting sponsored sends with an empty relayer"));
-    else out.push(ok("the node pauses sponsored sends when the relayer balance runs low"));
+    if (p.minRelayerBalanceWei === 0n) out.push(warn("MIN_RELAYER_BALANCE_POL=0: the node keeps accepting sponsored sends with an empty relayer"));
+    else out.push(ok(`the node pauses sponsored sends below ${formatEther(p.minRelayerBalanceWei)} POL in the relayer`));
   }
   if (p.alertWebhookUrl !== undefined && !p.alertWebhookUrl) out.push(warn("ALERT_WEBHOOK_URL is empty: nobody is told when the relayer runs low or a transaction gets stuck"));
   if (p.signerSource !== undefined) {

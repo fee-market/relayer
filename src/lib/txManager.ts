@@ -1,5 +1,5 @@
-import { type Hex, type SendTransactionParameters, type TransactionReceipt, keccak256 } from "viem";
-import { config } from "../config.js";
+import { type Hex, type SendTransactionParameters, type TransactionReceipt, formatGwei, keccak256 } from "viem";
+import { config, parseDecimalUnits } from "../config.js";
 import { alert } from "../services/alerts.js";
 import { m } from "../services/telemetry.js";
 import { logger } from "./log.js";
@@ -24,7 +24,7 @@ export type SendParams = Omit<SendTransactionParameters, "account" | "chain" | "
 
 export class FeeTooHighError extends Error {
   constructor(public readonly maxFeePerGas: bigint) {
-    super(`network fee is ${maxFeePerGas / 1_000_000_000n} gwei, above this sponsor's cap of ${config.policy.maxFeePerGasGwei} gwei`);
+    super(`network fee is ${formatGwei(maxFeePerGas)} gwei, above this sponsor's cap of ${config.policy.maxFeePerGasGwei} gwei`);
     this.name = "FeeTooHighError";
   }
 }
@@ -78,8 +78,11 @@ async function currentFees(): Promise<{ maxFeePerGas: bigint; maxPriorityFeePerG
   });
 }
 
+/** MAX_FEE_PER_GAS_GWEI in wei; it may be fractional (0.5 gwei). 0 = no cap. */
+const feeCapWei = () => parseDecimalUnits("MAX_FEE_PER_GAS_GWEI", config.policy.maxFeePerGasGwei.toFixed(9), 9);
+
 function assertFeeAllowed(maxFeePerGas: bigint): void {
-  const cap = BigInt(config.policy.maxFeePerGasGwei) * GWEI;
+  const cap = feeCapWei();
   if (cap > 0n && maxFeePerGas > cap) throw new FeeTooHighError(maxFeePerGas);
 }
 
@@ -230,7 +233,7 @@ async function replace(f: Inflight, now: number): Promise<void> {
   const fees = await currentFees();
   if (fees.maxFeePerGas > maxFeePerGas) maxFeePerGas = fees.maxFeePerGas;
   if (fees.maxPriorityFeePerGas > maxPriorityFeePerGas) maxPriorityFeePerGas = fees.maxPriorityFeePerGas;
-  const cap = BigInt(config.policy.maxFeePerGasGwei) * GWEI;
+  const cap = feeCapWei();
   if (cap > 0n && maxFeePerGas > cap) {
     m.txStuck.inc();
     alert(`stuck-cap:${f.nonce}`, `transaction nonce ${f.nonce} is stuck and replacing it would exceed MAX_FEE_PER_GAS_GWEI (${config.policy.maxFeePerGasGwei}).`);

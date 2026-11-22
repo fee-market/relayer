@@ -15,6 +15,29 @@ function envBool(key: string, fallback: string): boolean {
   return env(key, fallback).toLowerCase() === "true";
 }
 
+/** A decimal amount in whole units ("0.1", "5", "0.003") as its smallest unit. Refuses anything else, naming the variable. */
+export function parseDecimalUnits(key: string, value: string, decimals: number): bigint {
+  const v = value.trim().replace(/_/g, "");
+  if (!/^\d+(\.\d+)?$/.test(v)) throw new Error(`${key}=${value}: expected a plain number like 0.1, 5 or 0.003`);
+  const [whole, frac = ""] = v.split(".");
+  if (frac.length > decimals) throw new Error(`${key}=${value}: at most ${decimals} decimal places`);
+  return BigInt(whole) * 10n ** BigInt(decimals) + BigInt(frac.padEnd(decimals, "0") || "0");
+}
+
+/** A native-token (POL) amount: `<polKey>` as a decimal if set, else the older `<weiKey>` in wei, else `fallbackPol`. */
+function envNative(polKey: string, weiKey: string, fallbackPol: string): bigint {
+  const pol = process.env[polKey]?.trim();
+  if (pol) return parseDecimalUnits(polKey, pol, 18);
+  const wei = process.env[weiKey]?.trim();
+  if (wei) {
+    if (!/^\d+$/.test(wei)) throw new Error(`${weiKey}=${wei}: must be whole wei; for a decimal amount like 0.1 use ${polKey}=0.1`);
+    return BigInt(wei);
+  }
+  return parseDecimalUnits(polKey, fallbackPol, 18);
+}
+
+const maxFeePerGasGwei = env("MAX_FEE_PER_GAS_GWEI", "500");
+
 const rpcUrl = env("RPC_URL");
 /** RPC_URL first, then any RPC_URLS fallbacks (comma-separated), without duplicates. */
 const rpcUrls = [...new Set([rpcUrl, ...env("RPC_URLS", "").split(",").map((s) => s.trim()).filter(Boolean)])];
@@ -70,7 +93,7 @@ export const config = {
   // Refuse a sponsored request whose gas costs more than `maxMultiple` times what the plan pays for that request
   // (the plan's price per transaction, converted to the native token by a price oracle). 0 = off. A gas spike or a
   // cheap plan can otherwise make every sponsored send a loss. Only /relay is guarded: it is the call that earns the
-  // per-request price; /subscribe and /topup are the cost of getting a customer and are bounded by MAX_GAS_WEI.
+  // per-request price; /subscribe and /topup are the cost of getting a customer and are bounded by MAX_GAS_POL.
   profit: {
     maxMultiple: Number(env("PROFIT_GUARD_MAX_MULTIPLE", "0")),
     // chainlink: read NATIVE_USD_FEED; fixed: NATIVE_PRICE_USD (a number, for a chain without a feed); off: no price known
@@ -81,7 +104,7 @@ export const config = {
     maxAgeSec: Number(env("ORACLE_MAX_AGE_SEC", "7200")),
     // Payment tokens treated as worth 1 USD (the guard compares in dollars). Default: the Polygon stablecoins.
     stableTokens: env("STABLE_TOKENS", "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359,0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,0xc2132D05D31c914a87C6611C10748AEb04B58e8F,0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063").split(",").map((t) => t.trim().toLowerCase()).filter(Boolean),
-    // What to do when the guard is on but the price or the token cannot be priced: allow (default; the plain MAX_GAS_WEI cap
+    // What to do when the guard is on but the price or the token cannot be priced: allow (default; the plain MAX_GAS_POL cap
     // still applies) or refuse (strict: no price, no sponsorship).
     unpriced: env("PROFIT_GUARD_UNPRICED", "allow") as "allow" | "refuse",
   },
@@ -140,9 +163,9 @@ export const config = {
 
   // --- policy: protect the sponsor from losing money / being abused ---
   policy: {
-    // Refuse to redeem if estimated gas cost (gas * gasPrice, wei) exceeds this cap. 0 = no cap (not advised:
-    // `sponsor:doctor` warns). Default 0.1 of the native token, about 500k gas at 200 gwei.
-    maxGasWei: BigInt(env("MAX_GAS_WEI", "100000000000000000")),
+    // Refuse to redeem if estimated gas cost (gas * gasPrice) exceeds this cap, held in wei. Set as MAX_GAS_POL=0.1
+    // (MAX_GAS_WEI still works). 0 = no cap (not advised: `sponsor:doctor` warns). Default 0.1 POL, ~500k gas at 200 gwei.
+    maxGasWei: envNative("MAX_GAS_POL", "MAX_GAS_WEI", "0.1"),
     // Hard ceiling on gas units for one redemption. It is also set as the transaction's own gas limit, so a
     // user-crafted heavy batch can never consume more than this, whatever the simulation said.
     maxGasUnits: BigInt(env("MAX_GAS_UNITS", "600000")),
@@ -161,9 +184,10 @@ export const config = {
       .filter(Boolean),
     // Refuse new sponsored requests while the relayer holds less than this (wei): better a clear 503 than
     // accepting work that cannot be paid for. 0 = off.
-    minRelayerBalanceWei: BigInt(env("MIN_RELAYER_BALANCE_WEI", "300000000000000000")),
+    minRelayerBalanceWei: envNative("MIN_RELAYER_BALANCE_POL", "MIN_RELAYER_BALANCE_WEI", "0.3"),
     // Do not broadcast when the network's max fee per gas is above this (gwei). 0 = off.
-    maxFeePerGasGwei: Number(env("MAX_FEE_PER_GAS_GWEI", "500")),
+    // Decimals allowed (e.g. 0.5 gwei on a cheap chain); validated here so a typo fails at startup.
+    maxFeePerGasGwei: (parseDecimalUnits("MAX_FEE_PER_GAS_GWEI", maxFeePerGasGwei, 9), Number(maxFeePerGasGwei)),
     // Require the user delegation to carry the RedeemerRestrictionEnforcer caveat locked to us.
     requireRedeemerRestriction: envBool("REQUIRE_REDEEMER_RESTRICTION", "true"),
     // Longest deadline (seconds from now) a delegation may carry; a relayer must not be able to sit on a

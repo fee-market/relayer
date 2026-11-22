@@ -237,7 +237,7 @@ configure_env() {
   unset RPC RPC2 THIRDWEB WEBHOOK
   ok "Wrote .env (mode 600) with a new relayer key, a dashboard token and a metrics token"
   sync_addresses
-  note "Spending limits (edit in .env later): MAX_GAS_WEI=$(get_env MAX_GAS_WEI)  MIN_RELAYER_BALANCE_WEI=$(get_env MIN_RELAYER_BALANCE_WEI)"
+  note "Spending limits (edit in .env later): MAX_GAS_POL=$(get_env MAX_GAS_POL)  MIN_RELAYER_BALANCE_POL=$(get_env MIN_RELAYER_BALANCE_POL)  MAX_FEE_PER_GAS_GWEI=$(get_env MAX_FEE_PER_GAS_GWEI)"
 }
 
 fund_relayer() {

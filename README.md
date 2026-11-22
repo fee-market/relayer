@@ -166,6 +166,6 @@ Common responses: `200` · `422` validation · `429` rate limit · `503` busy/lo
 ## Ops notes
 
 - Keep the relayer key hot with a **limited** balance; top up from cold storage.
-- Cap spend with `MAX_GAS_WEI` / `MAX_GAS_UNITS`.
+- Cap spend with `MAX_GAS_POL` (e.g. `0.1`) / `MAX_GAS_UNITS`.
 - One relayer key per process.
 - Publishing new metadata or rotating keys returns a VERIFIED sponsor to **PENDING** until re-verified.

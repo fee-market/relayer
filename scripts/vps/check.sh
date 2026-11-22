@@ -355,9 +355,12 @@ else
   if [ -z "$(env_get "$ENV_FILE" METRICS_TOKEN)" ]; then warn "METRICS_TOKEN is empty: /metrics is off"; fi
   if [ -z "$(env_get "$ENV_FILE" ALERT_WEBHOOK_URL)" ]; then warn "ALERT_WEBHOOK_URL is empty" "Nobody is told when the relayer runs low or a transaction is stuck"; fi
   if [ "$(env_get "$ENV_FILE" CORS_ORIGINS)" = "*" ]; then warn "CORS_ORIGINS is *" "List your web origins; the doctor refuses a published node with *"; fi
-  for cap in MAX_GAS_WEI MAX_GAS_UNITS MAX_FEE_PER_GAS_GWEI MIN_RELAYER_BALANCE_WEI; do
-    v=$(env_get "$ENV_FILE" "$cap")
-    if [ -z "$v" ] || [ "$v" = 0 ]; then warn "$cap is off" "Set a spend cap in .env before publishing"; fi
+  # A POL setting wins over its older wei twin; either one counts as set.
+  for cap in MAX_GAS_POL:MAX_GAS_WEI MAX_GAS_UNITS MAX_FEE_PER_GAS_GWEI MIN_RELAYER_BALANCE_POL:MIN_RELAYER_BALANCE_WEI; do
+    v=$(env_get "$ENV_FILE" "${cap%%:*}")
+    if [ -z "$v" ] && [ "${cap#*:}" != "$cap" ]; then v=$(env_get "$ENV_FILE" "${cap#*:}"); fi
+    if [ -n "$v" ] && [ -z "$(printf '%s' "$v" | tr -d '0.')" ]; then v=0; fi
+    if [ -z "$v" ] || [ "$v" = 0 ]; then warn "${cap%%:*} is off" "Set a spend cap in .env before publishing"; fi
   done
   if [ -z "$(env_get "$ENV_FILE" THIRDWEB_SECRET_KEY)" ] && [ -z "$(env_get "$ENV_FILE" THIRDWEB_CLIENT_ID)" ] && [ "$(env_get "$ENV_FILE" METADATA_STORAGE)" != filone ]; then
     warn "No metadata storage key (THIRDWEB_SECRET_KEY)" "sponsor:onboard cannot publish your metadata without one"

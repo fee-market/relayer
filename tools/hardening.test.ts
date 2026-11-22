@@ -187,6 +187,16 @@ await test("preflight: an estimate above MAX_GAS_UNITS is refused (a heavy batch
   assert.equal(r.ok, false);
   assert.match(r.reason!, /exceeds this sponsor's limit of 600000/);
 });
+await test("config: decimal amounts parse to exact smallest units and typos are refused", async () => {
+  const { parseDecimalUnits } = await import("../src/config.js");
+  assert.equal(parseDecimalUnits("X", "0.1", 18), 100_000_000_000_000_000n);
+  assert.equal(parseDecimalUnits("X", "5", 18), 5_000_000_000_000_000_000n);
+  assert.equal(parseDecimalUnits("X", "0.003", 18), 3_000_000_000_000_000n);
+  assert.equal(parseDecimalUnits("X", "0.5", 9), 500_000_000n);
+  assert.equal(parseDecimalUnits("X", "0", 18), 0n);
+  for (const bad of ["", "abc", "1e18", "-1", "0.1 POL", "1,5"]) assert.throws(() => parseDecimalUnits("MAX_GAS_POL", bad, 18), /MAX_GAS_POL/);
+  assert.throws(() => parseDecimalUnits("X", "0.0000000001", 9), /decimal places/);
+});
 await test("preflight: a refusal names the setting to raise and flags it as a unit-cap refusal", async () => {
   estimate = () => ({ result: "0x" + (649_281).toString(16) });
   const r = await preflight(plainReq as never);

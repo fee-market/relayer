@@ -3,6 +3,7 @@ import {
   decodeEventLog,
   encodeAbiParameters,
   encodeFunctionData,
+  formatEther,
   type Hex,
   type Log,
   type SignAuthorizationReturnType,
@@ -123,7 +124,7 @@ function isRevert(err: unknown): boolean {
  *    the delegation designator (`0xef0100 ++ implementation`), which is what the authorization installs. Public
  *    Polygon RPCs execute that, so first-use sends get the same revert protection as any other.
  *  - The estimate (plus 25% headroom) becomes the transaction's own gas limit and is refused above MAX_GAS_UNITS, so
- *    a heavy user batch can neither slip past nor run away. MAX_GAS_WEI caps the estimated cost in the native token.
+ *    a heavy user batch can neither slip past nor run away. MAX_GAS_POL caps the estimated cost in the native token.
  */
 export async function preflight(
   req: ExecutionRequest,
@@ -167,7 +168,12 @@ export async function preflight(
   const gasPrice = await cached("gasPrice", 2000, () => publicClient.getGasPrice());
   const gasCostWei = gas * gasPrice;
   if (config.policy.maxGasWei > 0n && gasCostWei > config.policy.maxGasWei) {
-    return { ok: false, reason: `gas cost ${gasCostWei} exceeds cap ${config.policy.maxGasWei}`, gasCostWei, gas };
+    return {
+      ok: false,
+      reason: `gas cost ${gasCostWei} exceeds cap ${config.policy.maxGasWei} (${formatEther(gasCostWei)} POL > MAX_GAS_POL ${formatEther(config.policy.maxGasWei)})`,
+      gasCostWei,
+      gas,
+    };
   }
   return { ok: true, gasCostWei, gas: gasLimit, simulated };
 }

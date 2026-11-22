@@ -159,7 +159,7 @@ async function executeSponsored(res: Response, req: ExecutionRequest, ctx: Ctx) 
       alert(
         `gas-units:${limit.name}`,
         `A ${ctx.label} needed ${pf.gas} gas, above ${limit.name}=${limit.cap}, and was refused. If this is a normal action, ` +
-          `set ${limit.name}=${suggestedGasCap(pf.gas)} in .env and run \`npm run sponsor:ensure-running\`. MAX_GAS_WEI still caps the cost.`,
+          `set ${limit.name}=${suggestedGasCap(pf.gas)} in .env and run \`npm run sponsor:ensure-running\`. MAX_GAS_POL still caps the cost.`,
       );
     }
     return reject(422, pf.reason ?? "simulation failed");
