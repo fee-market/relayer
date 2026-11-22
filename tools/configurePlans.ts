@@ -216,14 +216,32 @@ async function main() {
   const proxyChoice = (await ask("  HTTPS front-end", "1")).toLowerCase();
   if (proxyChoice === "2" || proxyChoice === "nginx") {
     if (existsSync(ENV_PATH)) writeEnvKey("PROXY_KIND", "nginx");
+    const runNow = await askYesNo("  Run setup-proxy + start the node service now? (needs sudo)", true);
     rl.close();
     console.log(`  → sudo bash scripts/vps/setup-proxy.sh nginx --domain ${domain}`);
-    console.log("  → then: npm run sponsor:serve");
+    if (runNow) {
+      spawnSync("sudo", ["bash", join(ROOT, "scripts/vps/setup-proxy.sh"), "nginx", "--domain", domain], {
+        stdio: "inherit",
+        cwd: ROOT,
+      });
+      spawnSync("bash", [join(ROOT, "scripts/ensure-node-running.sh")], { stdio: "inherit", cwd: ROOT });
+    } else {
+      console.log("  → later: npm run sponsor:serve");
+    }
   } else if (proxyChoice === "3" || proxyChoice === "apache") {
     if (existsSync(ENV_PATH)) writeEnvKey("PROXY_KIND", "apache");
+    const runNow = await askYesNo("  Run setup-proxy + start the node service now? (needs sudo)", true);
     rl.close();
     console.log(`  → sudo bash scripts/vps/setup-proxy.sh apache --domain ${domain}`);
-    console.log("  → then: npm run sponsor:serve");
+    if (runNow) {
+      spawnSync("sudo", ["bash", join(ROOT, "scripts/vps/setup-proxy.sh"), "apache", "--domain", domain], {
+        stdio: "inherit",
+        cwd: ROOT,
+      });
+      spawnSync("bash", [join(ROOT, "scripts/ensure-node-running.sh")], { stdio: "inherit", cwd: ROOT });
+    } else {
+      console.log("  → later: npm run sponsor:serve");
+    }
   } else if (proxyChoice === "4" || proxyChoice === "skip" || proxyChoice === "n") {
     rl.close();
     console.log("  Skipped. Later: npm run sponsor:serve  or  sudo bash scripts/vps/setup-proxy.sh nginx|apache");
@@ -242,7 +260,7 @@ async function main() {
     }
   }
 
-  console.log("\nNext: `npm run sponsor:onboard -- --dry-run` to preview, then `npm run sponsor:onboard`.");
+  console.log("\nNext: `npm run sponsor:onboard` (registers, publishes metadata, and keeps the node running for the curator).");
 }
 
 main().catch((e) => {

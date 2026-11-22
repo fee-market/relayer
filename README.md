@@ -16,10 +16,12 @@ git clone https://github.com/fee-market/relayer.git && cd relayer
 npm run setup
 cp .env.example .env          # or: npm run sponsor:init
 npm run sponsor:plans:configure
-npm run sponsor:onboard       # register, publish metadata (re-runnable)
-# ask the marketplace curator to verify you
-npm run sponsor:go            # list plans + start the node
+npm run sponsor:onboard       # register + publish metadata → PENDING, then starts the node as a background service
+# ask the marketplace curator to verify you (node must stay up — systemd or Docker)
+npm run sponsor:go            # after VERIFIED: listPlan on-chain + (re)start
 ```
+
+**Verification vs running the process:** the HTTP node does **not** wait for VERIFIED. `sponsor:onboard` / `sponsor:serve` / `sponsor:ensure-running` keep it up in the background (Docker Compose, or systemd `feemarket-relayer`) so the curator can hit `/health`. What *does* require VERIFIED is on-chain `listPlan` (and thus `npm run sponsor:go`). Re-run `sponsor:onboard` to check status; when VERIFIED, run `sponsor:go`.
 
 Dev: `npm run dev` then `curl localhost:8787/health`.
 
@@ -63,12 +65,13 @@ Copy [`.env.example`](.env.example) — every variable is documented there. Mini
 |--------|----------------|
 | `sponsor:init` | Write `.env`, generate relayer key |
 | `sponsor:plans:configure` | Profile + plans → `sponsor.plans.json`; syncs public URL; can start Caddy |
-| `sponsor:serve` | Start public HTTPS (`PROXY_KIND`: caddy / nginx / apache) |
+| `sponsor:serve` | Start public HTTPS + keep the node running (Docker or systemd) |
+| `sponsor:ensure-running` | Start/restart background node (`feemarket-relayer` or Compose) |
 | `sponsor:proxy` | Install/configure host nginx or Apache + Certbot (`sudo npm run sponsor:proxy -- nginx`) |
 | `sponsor:check-endpoint` | External check of the node URL + copyable DNS/SSL/`.env` settings |
 | `sponsor:vps` | Full guided VPS setup (`scripts/vps/setup.sh`) |
-| `sponsor:onboard` | Register / reuse sponsor, publish metadata |
-| `sponsor:go` | List plans and start the node |
+| `sponsor:onboard` | Register / publish metadata, then ensure the node is running for the curator |
+| `sponsor:go` | After VERIFIED: `listPlan` + start the node (`--no-start` = list only) |
 | `sponsor:doctor` | Read-only readiness check |
 | `sponsor:status` / `withdraw` / `rotate` / `accept` / `relayers` | Ops & key management |
 | `listing:gen` | Preview metadata + `listPlan` args (no txs) |

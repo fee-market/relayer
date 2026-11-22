@@ -137,8 +137,15 @@ export function planOnboard(s: OnboardState): Plan<OnboardStep> {
   let next: string;
   if (blockers.length) next = "Fix the items above and run `npm run sponsor:onboard` again.";
   else if (s.status === STATUS_VERIFIED && steps.length === 0) next = "You are VERIFIED. Run `npm run sponsor:go`.";
-  else if (steps.length === 0) next = `Nothing left to do on your side. Waiting for the curator to verify you (status ${statusLabel(s.status)}); re-run this command to check.`;
-  else next = "After these steps, ask the curator to verify you, then run `npm run sponsor:go`.";
+  else if (steps.length === 0) {
+    next =
+      `Nothing left on-chain. Keep the node running in the background so the curator can reach ${s.publicUrl || "your PUBLIC_RELAYER_URL"} ` +
+      `(status ${statusLabel(s.status)}). Re-run this command to check verification; after VERIFIED run \`npm run sponsor:go\`.`;
+  } else {
+    next =
+      "After these steps the CLI starts the node as a background service, then ask the curator to verify you. " +
+      "When VERIFIED, run `npm run sponsor:go`.";
+  }
   return { blockers, steps, next };
 }
 

@@ -121,9 +121,6 @@ if ! command -v "$PROXY" >/dev/null 2>&1 && { [ "$PROXY" != apache ] || ! comman
   die "$PROXY is not installed. Run: sudo bash scripts/vps/setup-proxy.sh $PROXY --domain $DOMAIN"
 fi
 
-note "Building the node…"
-npm run build
-
 # Reload proxy in case vhost was just written
 if [ "$PROXY" = nginx ]; then
   nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || true
@@ -131,21 +128,9 @@ else
   apache2ctl configtest 2>/dev/null && systemctl reload apache2 2>/dev/null || true
 fi
 
-if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet feemarket-relayer 2>/dev/null; then
-  systemctl restart feemarket-relayer
-  ok "Restarted feemarket-relayer.service"
-else
-  note "Start the node in the background (or under systemd/tmux):"
-  note "  HOST=127.0.0.1 PORT=$PORT npm start"
-  # Try a short-lived background start for health check if nothing listens yet
-  if ! curl -sf --max-time 2 "http://127.0.0.1:$PORT/live" >/dev/null 2>&1; then
-    note "No process on :$PORT yet — starting node in background for this check…"
-    mkdir -p data
-    nohup env HOST=127.0.0.1 PORT="$PORT" node dist/index.js >>data/relayer.out 2>&1 &
-    echo $! >data/relayer.pid
-    sleep 2
-  fi
-fi
+# Durable background process (systemd unit) — required so the curator can hit the URL after logout
+note "Ensuring the node runs as a background service…"
+bash "$ROOT/scripts/ensure-node-running.sh"
 
 wait_health
 ok "Serving via $PROXY (Ubuntu packages stay security-patched via apt). Node on 127.0.0.1:$PORT"

@@ -31,7 +31,8 @@ test("an existing registration is reused: no register, only fix .env and publish
 test("fully set up and in sync: nothing to do, waits for the curator", () => {
   const p = planOnboard({ ...fresh, chainSponsorId: 7n, envSponsorId: 7n, status: 1, onchainHash: H1, freshHash: H1 });
   assert.deepEqual(p.steps, []);
-  assert.match(p.next, /Waiting for the curator/);
+  assert.match(p.next, /curator/);
+  assert.match(p.next, /background|Keep the node running/i);
 });
 test("verified and in sync points at sponsor:go", () => {
   const p = planOnboard({ ...fresh, chainSponsorId: 7n, envSponsorId: 7n, status: 2, onchainHash: H1, freshHash: H1 });

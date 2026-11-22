@@ -8,6 +8,8 @@
  * when it differs, and only publishes metadata when the bytes it would publish differ from what is committed
  * on-chain. Verification is done by the curator; run it again to check where you are.
  */
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { config } from "../config.js";
 import { feeMarketRegistryAbi } from "../abi.js";
 import { publicClient, relayerAddress } from "../lib/clients.js";
@@ -16,6 +18,19 @@ import { registryBuildCode } from "./registryCode.js";
 import { writeEnvKey } from "./envFile.js";
 import { runSponsorScript } from "./child.js";
 import { metadataStorageReady, planOnboard, statusLabel, type OnboardState } from "./flow.js";
+
+const RELAYER_DIR = fileURLToPath(new URL("../..", import.meta.url));
+
+/** Start (or restart) the node in the background so the curator can hit /health while you wait. */
+function ensureNodeRunning(): void {
+  console.log("\n▶ ensure node running (background service)");
+  const script = fileURLToPath(new URL("../../scripts/ensure-node-running.sh", import.meta.url));
+  const res = spawnSync("bash", [script], { cwd: RELAYER_DIR, stdio: "inherit", env: process.env });
+  if (res.status !== 0) {
+    console.log("  ! could not auto-start the node — run: npm run sponsor:ensure-running");
+    console.log("  ! or:     npm run sponsor:serve");
+  }
+}
 
 const dryRun = process.argv.includes("--dry-run");
 const read = (functionName: string, args: unknown[] = []) =>
@@ -79,7 +94,11 @@ async function main() {
   const plan = planOnboard(state);
   for (const b of plan.blockers) console.log(` ✗ ${b}`);
   if (plan.blockers.length) return void (process.exitCode = 1, console.log(`\n${plan.next}`));
-  if (plan.steps.length === 0) return void console.log(plan.next);
+  if (plan.steps.length === 0) {
+    console.log(plan.next);
+    if (!dryRun && state.status !== 2 && state.status !== 3) ensureNodeRunning();
+    return;
+  }
   console.log("Steps:");
   for (const s of plan.steps) console.log(` • ${s.kind}`);
   if (dryRun) return void console.log(`\n${plan.next}`);
@@ -108,7 +127,13 @@ async function main() {
 
   const sponsor = (await read("sponsors", [sponsorId])) as readonly [string, string, string, number, boolean];
   console.log(`\nStatus now: ${statusLabel(sponsor[3])}`);
-  console.log(planOnboard({ ...state, chainSponsorId: sponsorId, envSponsorId: sponsorId, status: sponsor[3], onchainHash: "x", freshHash: "x" }).next);
+  const after = planOnboard({ ...state, chainSponsorId: sponsorId, envSponsorId: sponsorId, status: sponsor[3], onchainHash: "x", freshHash: "x" });
+  console.log(after.next);
+
+  // Curator review needs a live public URL — do not leave the sponsor with only an on-chain PENDING row.
+  if (sponsor[3] !== 2 /* VERIFIED */ && sponsor[3] !== 3 /* REVOKED */) {
+    ensureNodeRunning();
+  }
 }
 
 main().catch((e) => {

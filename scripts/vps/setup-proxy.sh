@@ -564,20 +564,33 @@ fi
 
 print_copyable_settings "$DOMAIN" "$TLS_MODE" "$KIND" "$RELAYER_PORT"
 
-section "Start the node"
-say "The proxy is up; the Node process must listen on localhost:"
-printf '\n     cd %s\n     npm run build && HOST=127.0.0.1 PORT=%s npm start\n' "$RELAYER_DIR" "$RELAYER_PORT"
-printf '     # or: npm run sponsor:serve\n\n'
+section "Start the node (background service)"
+note "Build + systemd unit so the process survives logout (curator needs /health)."
+OWNER=$(file_owner "$RELAYER_DIR")
+OWNER=${OWNER:-${SUDO_USER:-}}
 
-if confirm "Is the relayer already running on 127.0.0.1:$RELAYER_PORT? Run external checks now?"; then
-  if verify_public_endpoint "$DOMAIN" "$RELAYER_PORT"; then
-    ok "Public URL looks good"
+# dist/ must exist before the unit starts
+if [ -n "$OWNER" ] && [ "$OWNER" != root ] && id "$OWNER" >/dev/null 2>&1; then
+  note "Building as $OWNER…"
+  if have runuser; then
+    runuser -u "$OWNER" -- bash -lc "cd '$RELAYER_DIR' && npm run build"
   else
-    warn "Some checks failed" "Fix DNS/TLS/Cloudflare using the copyable block above, start the node, then: bash scripts/vps/check-endpoint.sh $DOMAIN"
+    su - "$OWNER" -c "cd '$RELAYER_DIR' && npm run build"
   fi
 else
-  note "After starting the node, validate with:"
-  printf '\n     bash scripts/vps/check-endpoint.sh %s\n\n' "$DOMAIN"
+  (cd "$RELAYER_DIR" && npm run build)
+fi
+
+if [ -n "$OWNER" ] && [ "$OWNER" != root ] && id "$OWNER" >/dev/null 2>&1; then
+  bash "$VPS_DIR/install-relayer-service.sh" --user "$OWNER" --dir "$RELAYER_DIR" --start
+else
+  bash "$VPS_DIR/install-relayer-service.sh" --dir "$RELAYER_DIR" --start
+fi
+
+if verify_public_endpoint "$DOMAIN" "$RELAYER_PORT"; then
+  ok "Public URL looks good — leave the service running for the curator"
+else
+  warn "Endpoint not fully green yet" "Keep feemarket-relayer running; fix DNS/TLS, then: bash scripts/vps/check-endpoint.sh $DOMAIN"
 fi
 
 case "$TLS_MODE" in
@@ -585,3 +598,4 @@ case "$TLS_MODE" in
   import | selfsigned) note "Cert files: $FULLCHAIN + $PRIVKEY. Replace and reload $KIND to rotate." ;;
   cf-flexible) note "Prefer upgrading to Full (strict) + certbot when you can." ;;
 esac
+note "Node service: systemctl status feemarket-relayer · logs: journalctl -u feemarket-relayer -f"

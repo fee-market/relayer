@@ -35,6 +35,7 @@
     "sponsor:init": "tsx src/sponsor/init.ts",
     "sponsor:plans:configure": "tsx tools/configurePlans.ts",
     "sponsor:serve": "bash scripts/serve-public.sh",
+    "sponsor:ensure-running": "bash scripts/ensure-node-running.sh",
     "sponsor:proxy": "bash scripts/vps/setup-proxy.sh",
     "sponsor:check-endpoint": "bash scripts/vps/check-endpoint.sh",
     "sponsor:vps": "bash scripts/vps/setup.sh",

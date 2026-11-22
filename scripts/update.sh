@@ -118,5 +118,19 @@ fi
 note "Building…"
 npm run build
 ok "Built dist/"
-warn "Docker Compose was not used — restart your process manager yourself (systemd / pm2 / screen)."
-note "Then: curl -sS http://127.0.0.1:8787/health"
+if systemctl list-unit-files feemarket-relayer.service 2>/dev/null | grep -q feemarket-relayer; then
+  note "Restarting feemarket-relayer.service…"
+  if [ "$(id -u)" -eq 0 ]; then
+    systemctl restart feemarket-relayer.service
+  elif command -v sudo >/dev/null; then
+    sudo systemctl restart feemarket-relayer.service
+  else
+    warn "Cannot restart systemd unit without sudo"
+  fi
+  ok "Service restarted"
+  note "Logs: journalctl -u feemarket-relayer -f"
+else
+  note "No feemarket-relayer.service — starting via ensure-node-running…"
+  bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ensure-node-running.sh" || warn "Start manually: npm run sponsor:ensure-running"
+fi
+note "Health: curl -sS http://127.0.0.1:8787/health"
