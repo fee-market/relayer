@@ -4,6 +4,11 @@
  *   npm run sponsor:onboard              # do it
  *   npm run sponsor:onboard -- --dry-run # print what it would do
  *   npm run sponsor:onboard -- --reverify # also republish changed metadata while VERIFIED (back to PENDING)
+ *   npm run sponsor:onboard -- --no-start # on-chain steps only: do not start or restart a node on this machine
+ *
+ * While you wait for the curator it also makes sure the node is running here (the curator checks your /health).
+ * Pass --no-start when this machine is not the server (your laptop), or when you run the node some other way:
+ * a second node with the same relayer key must never be started.
  *
  * Idempotent: it reuses an existing registration (looked up by the relayer address), only writes SPONSOR_ID
  * when it differs, and only publishes metadata when the bytes it would publish differ from what is committed
@@ -22,8 +27,12 @@ import { describeMetadataChanges, metadataStorageReady, planOnboard, statusLabel
 
 const RELAYER_DIR = fileURLToPath(new URL("../..", import.meta.url));
 
-/** Start (or restart) the node in the background so the curator can hit /health while you wait. */
+/** Start (or restart) the node in the background so the curator can hit /health while you wait. Skipped with --no-start. */
 function ensureNodeRunning(): void {
+  if (noStart) {
+    console.log("\n· --no-start: the node was not started here. The curator needs your public URL to answer, so keep it running where it lives.");
+    return;
+  }
   console.log("\n▶ ensure node running (background service)");
   const script = fileURLToPath(new URL("../../scripts/ensure-node-running.sh", import.meta.url));
   const res = spawnSync("bash", [script], { cwd: RELAYER_DIR, stdio: "inherit", env: process.env });
@@ -35,6 +44,7 @@ function ensureNodeRunning(): void {
 
 const dryRun = process.argv.includes("--dry-run");
 const reverify = process.argv.includes("--reverify");
+const noStart = process.argv.includes("--no-start");
 
 const gatewayUrls = (uri: string) =>
   uri.startsWith("ipfs://") ? ["https://ipfs.io/ipfs/", "https://dweb.link/ipfs/"].map((g) => g + uri.slice(7)) : [uri];

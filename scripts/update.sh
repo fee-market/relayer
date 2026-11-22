@@ -105,32 +105,16 @@ else
 fi
 ok "Dependencies installed"
 
-if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  if docker compose ps -q relayer 2>/dev/null | grep -q . || [ -f docker-compose.yml ]; then
-    note "Rebuilding and restarting with Docker Compose…"
-    docker compose up -d --build
-    ok "Containers rebuilt"
-    note "Health: curl -sS https://\${PUBLIC_DOMAIN}/health   or   docker compose ps"
-    exit 0
-  fi
+# How the node runs on this server (Docker Compose, the feemarket-relayer service, or a bare process) is decided in
+# ONE place, ensure-node-running.sh, from PROXY_KIND in .env. Docker being installed is not a reason to use it: a
+# container started next to a host service would be a second node with the same relayer key.
+if [ ! -f .env ]; then
+  warn "No .env, so there is no node to restart. Set one up with: npm run sponsor:setup"
+  exit 0
 fi
-
-note "Building…"
-npm run build
-ok "Built dist/"
-if systemctl list-unit-files feemarket-relayer.service 2>/dev/null | grep -q feemarket-relayer; then
-  note "Restarting feemarket-relayer.service…"
-  if [ "$(id -u)" -eq 0 ]; then
-    systemctl restart feemarket-relayer.service
-  elif command -v sudo >/dev/null; then
-    sudo systemctl restart feemarket-relayer.service
-  else
-    warn "Cannot restart systemd unit without sudo"
-  fi
-  ok "Service restarted"
-  note "Logs: journalctl -u feemarket-relayer -f"
+note "Rebuilding and restarting the node…"
+if bash "$ROOT/scripts/ensure-node-running.sh" --restart; then
+  ok "The node runs the new version"
 else
-  note "No feemarket-relayer.service — starting via ensure-node-running…"
-  bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ensure-node-running.sh" || warn "Start manually: npm run sponsor:ensure-running"
+  die "The node did not restart (see above). It may still be running the old version: npm run sponsor:ensure-running"
 fi
-note "Health: curl -sS http://127.0.0.1:8787/health"

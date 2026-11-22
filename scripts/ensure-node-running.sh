@@ -2,10 +2,13 @@
 # Ensure the sponsor node is running in the background so the curator can reach it.
 #
 #   bash scripts/ensure-node-running.sh
+#   bash scripts/ensure-node-running.sh --restart   # restart even when nothing looks changed (used by scripts/update.sh)
 #   npm run sponsor:ensure-running
 #
-# - PROXY_KIND=caddy (or unset with docker): docker compose up -d --build
-# - nginx / apache / bare: systemd unit feemarket-relayer (installs if missing)
+# - PROXY_KIND=caddy: docker compose up -d --build
+# - nginx / apache / bare / tunnel: systemd unit feemarket-relayer (installs if missing)
+# - PROXY_KIND unset: the host service when one is already in use, else Docker Compose when available, else the host service.
+#   One server runs ONE node: never a container next to a host service with the same relayer key.
 # Falls back to nohup only when systemd cannot be installed without a password.
 set -euo pipefail
 
@@ -14,6 +17,18 @@ cd "$ROOT"
 
 # shellcheck source=vps/lib.sh
 . "$ROOT/scripts/vps/lib.sh"
+
+FORCE_RESTART=0
+for arg in "$@"; do
+  case "$arg" in
+    --restart) FORCE_RESTART=1 ;;
+    -h | --help)
+      sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) die "Unknown option: $arg (see --help)" ;;
+  esac
+done
 
 PROXY=$(env_get "$ENV_FILE" PROXY_KIND)
 PROXY=$(printf '%s' "${PROXY:-}" | tr '[:upper:]' '[:lower:]')
@@ -63,6 +78,12 @@ env_newer_than_service() {
   [ "$env_m" -gt "$started" ]
 }
 
+unit_installed() { systemctl list-unit-files feemarket-relayer.service 2>/dev/null | grep -q feemarket-relayer; }
+# Installed AND in use: a unit that setup.sh disabled when the node moved to Docker does not count.
+host_service_in_use() {
+  unit_installed && { systemctl is-enabled --quiet feemarket-relayer.service 2>/dev/null || systemctl is-active --quiet feemarket-relayer.service 2>/dev/null; }
+}
+
 run_as_root() {
   if [ "$(id -u)" -eq 0 ]; then
     "$@"
@@ -101,7 +122,7 @@ install_and_start_systemd() {
   local unit_dir unit_user reinstalled=0
   unit_dir=$(systemctl show -p WorkingDirectory --value feemarket-relayer.service 2>/dev/null || true)
   unit_user=$(systemctl show -p User --value feemarket-relayer.service 2>/dev/null || true)
-  if systemctl list-unit-files feemarket-relayer.service 2>/dev/null | grep -q feemarket-relayer &&
+  if unit_installed &&
     [ "$unit_dir" = "$ROOT" ] && [ "$unit_user" = "$owner" ]; then
     ok "systemd unit feemarket-relayer already installed"
   else
@@ -115,8 +136,8 @@ install_and_start_systemd() {
     reinstalled=1
   fi
 
-  # A live node is only restarted for a reason: new unit, new build, or .env edited since it started.
-  if [ "$reinstalled" -eq 0 ] && [ "$running" = "$built" ] && systemctl is-active --quiet feemarket-relayer.service &&
+  # A live node is only restarted for a reason: asked to (--restart), new unit, new build, or .env edited since it started.
+  if [ "$FORCE_RESTART" -eq 0 ] && [ "$reinstalled" -eq 0 ] && [ "$running" = "$built" ] && systemctl is-active --quiet feemarket-relayer.service &&
     live_ok && ! env_newer_than_service; then
     ok "feemarket-relayer.service is already running (nothing changed, not restarted)"
     return 0
@@ -139,6 +160,12 @@ start_nohup_fallback() {
   note "Fix later: sudo bash scripts/vps/install-relayer-service.sh --start"
   npm run build
   mkdir -p data
+  if [ "$FORCE_RESTART" -eq 1 ] && [ -f data/relayer.pid ] && kill -0 "$(cat data/relayer.pid)" 2>/dev/null; then
+    note "Stopping pid $(cat data/relayer.pid) (it finishes the requests in flight first)…"
+    kill "$(cat data/relayer.pid)" 2>/dev/null || true
+    local i=0
+    while kill -0 "$(cat data/relayer.pid)" 2>/dev/null && [ $i -lt 35 ]; do sleep 1; i=$((i + 1)); done
+  fi
   if [ -f data/relayer.pid ] && kill -0 "$(cat data/relayer.pid)" 2>/dev/null; then
     ok "Already running (pid $(cat data/relayer.pid))"
   else
@@ -159,12 +186,19 @@ case "$PROXY" in
     exit 0
     ;;
   caddy | docker | "")
-    if have docker && docker compose version >/dev/null 2>&1 && [ -f "$ROOT/docker-compose.yml" ]; then
-      # Prefer docker when compose file exists and PROXY is caddy/empty
-      if [ -z "$PROXY" ] || [ "$PROXY" = caddy ] || [ "$PROXY" = docker ]; then
-        start_docker
+    # PROXY_KIND unset and a host service in use: that service IS the node. Starting Compose here would put a second
+    # node with the same relayer key next to it (and Caddy would fight the host proxy for :80/:443).
+    if [ -z "$PROXY" ] && host_service_in_use; then
+      note "PROXY_KIND is not set in .env; using the installed feemarket-relayer.service"
+      if install_and_start_systemd; then
         exit 0
       fi
+      start_nohup_fallback
+      exit 0
+    fi
+    if have docker && docker compose version >/dev/null 2>&1 && [ -f "$ROOT/docker-compose.yml" ]; then
+      start_docker
+      exit 0
     fi
     # No docker — host systemd
     if install_and_start_systemd; then
