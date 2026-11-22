@@ -3,7 +3,7 @@
  *   npm run test:onboard
  */
 import assert from "node:assert/strict";
-import { ZERO_HASH, chooseMode, healthBaseUrl, metadataStorageReady, planGo, planOnboard, type GoState, type OnboardState } from "../src/sponsor/flow.js";
+import { ZERO_HASH, chooseMode, describeMetadataChanges, healthBaseUrl, metadataStorageReady, planGo, planOnboard, type GoState, type OnboardState } from "../src/sponsor/flow.js";
 
 let passed = 0;
 let total = 0;
@@ -39,9 +39,31 @@ test("verified and in sync points at sponsor:go", () => {
   assert.deepEqual(p.steps, []);
   assert.match(p.next, /sponsor:go/);
 });
-test("changed metadata is republished", () => {
-  const p = planOnboard({ ...fresh, chainSponsorId: 7n, envSponsorId: 7n, status: 2, onchainHash: H1, freshHash: H2 });
+test("changed metadata is republished while PENDING", () => {
+  const p = planOnboard({ ...fresh, chainSponsorId: 7n, envSponsorId: 7n, status: 1, onchainHash: H1, freshHash: H2 });
   assert.deepEqual(kinds(p), ["publish-metadata"]);
+});
+test("changed metadata of a VERIFIED sponsor is held, not published", () => {
+  const p = planOnboard({ ...fresh, chainSponsorId: 7n, envSponsorId: 7n, status: 2, onchainHash: H1, freshHash: H2 });
+  assert.deepEqual(p.steps, []);
+  assert.equal(p.heldReverify, true);
+  assert.match(p.next, /--reverify/);
+  assert.doesNotMatch(p.next, /Run `npm run sponsor:go`/);
+});
+test("--reverify publishes the change of a VERIFIED sponsor", () => {
+  const p = planOnboard({ ...fresh, chainSponsorId: 7n, envSponsorId: 7n, status: 2, onchainHash: H1, freshHash: H2, allowReverify: true });
+  assert.deepEqual(kinds(p), ["publish-metadata"]);
+  assert.equal(p.heldReverify, false);
+});
+test("metadata changes are described field by field and per plan", () => {
+  const before = { name: "A", relayerEndpoint: "https://n.example/relay", plans: [{ name: "P1", price: "1" }, { name: "Old" }] };
+  const after = { name: "A", relayerEndpoint: "https://n.example", plans: [{ name: "P1", price: "2" }, { name: "New" }] };
+  assert.deepEqual(describeMetadataChanges(before, after), [
+    "relayerEndpoint: https://n.example/relay  →  https://n.example",
+    'plan changed: "P1"',
+    'plan added: "New"',
+    'plan removed: "Old"',
+  ]);
 });
 test("hash comparison is case-insensitive", () => {
   const p = planOnboard({ ...fresh, chainSponsorId: 7n, envSponsorId: 7n, status: 2, onchainHash: H1.toUpperCase().replace("0X", "0x"), freshHash: H1 });
@@ -80,6 +102,10 @@ test("go: falls back to running the node directly without docker or a domain", (
 });
 test("go: blocked unless VERIFIED", () => {
   for (const status of [null, 0, 1, 3]) assert.match(planGo({ ...go, status }).blockers.join(), /VERIFIED/);
+});
+test("go: blocked when the plans differ from the verified metadata", () => {
+  assert.match(planGo({ ...go, metadataInSync: false }).blockers.join(), /--reverify/);
+  assert.deepEqual(planGo({ ...go, metadataInSync: true }).blockers, []);
 });
 test("go: explicit docker mode reports missing prerequisites", () => {
   const b = planGo({ ...go, mode: "docker", hasDocker: false, hasCompose: false, hasDomain: false }).blockers.join();

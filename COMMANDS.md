@@ -53,7 +53,8 @@ If you clone as root, the root part copies the repo to `/home/<node user>/relaye
 | `npm run setup` | `npm ci` — install deps (quiet). |
 | `npm run sponsor:init` | Create `.env` (relayer key, payout, optional public URL / thirdweb). Does **not** set profile name. |
 | `npm run sponsor:plans:configure` | Interactive `sponsor.plans.json`: public URL, name, region, optional description/website/support, plans. Syncs `PUBLIC_*` into `.env`. Can refresh HTTPS. |
-| `npm run sponsor:onboard` | Register (or reuse), publish metadata, publish endpoint if needed; then **ensure the node is running** for the curator. Idempotent; re-run to see status. |
+| `npm run sponsor:onboard` | Register (or reuse), publish metadata, publish endpoint if needed; then **ensure the node is running** for the curator. Idempotent; re-run to see status. When you're VERIFIED it never republishes changed metadata on its own: it lists what changed and stops. |
+| `npm run sponsor:onboard -- --reverify` | Publish changed plans, profile or URL while VERIFIED. This sends you back to PENDING until the curator verifies you again. |
 | `npm run sponsor:status` | Print on-chain status: `UNVERIFIED` / `PENDING` / `VERIFIED` / `REVOKED`. `-- --short` prints only the word. |
 | `npm run sponsor:doctor` | Read-only readiness (RPC, balance, registry, config). |
 | `npm run sponsor:go` | **After VERIFIED:** `listPlan` on-chain, then start node (Docker or foreground). `--no-start` = list only. `--dry-run` = print plan. |

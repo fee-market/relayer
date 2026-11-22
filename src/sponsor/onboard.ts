@@ -3,6 +3,7 @@
  *
  *   npm run sponsor:onboard              # do it
  *   npm run sponsor:onboard -- --dry-run # print what it would do
+ *   npm run sponsor:onboard -- --reverify # also republish changed metadata while VERIFIED (back to PENDING)
  *
  * Idempotent: it reuses an existing registration (looked up by the relayer address), only writes SPONSOR_ID
  * when it differs, and only publishes metadata when the bytes it would publish differ from what is committed
@@ -17,7 +18,7 @@ import { checkRegistryBuild } from "./doctorChecks.js";
 import { registryBuildCode } from "./registryCode.js";
 import { writeEnvKey } from "./envFile.js";
 import { runSponsorScript } from "./child.js";
-import { metadataStorageReady, planOnboard, statusLabel, type OnboardState } from "./flow.js";
+import { describeMetadataChanges, metadataStorageReady, planOnboard, statusLabel, type OnboardState } from "./flow.js";
 
 const RELAYER_DIR = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -33,6 +34,34 @@ function ensureNodeRunning(): void {
 }
 
 const dryRun = process.argv.includes("--dry-run");
+const reverify = process.argv.includes("--reverify");
+
+const gatewayUrls = (uri: string) =>
+  uri.startsWith("ipfs://") ? ["https://ipfs.io/ipfs/", "https://dweb.link/ipfs/"].map((g) => g + uri.slice(7)) : [uri];
+
+/** The metadata currently committed on-chain, fetched from its URI; null when it cannot be fetched. */
+async function committedMetadata(uri: string): Promise<Record<string, unknown> | null> {
+  for (const url of gatewayUrls(uri)) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (res.ok) return (await res.json()) as Record<string, unknown>;
+    } catch {
+      /* try the next gateway */
+    }
+  }
+  return null;
+}
+
+async function explainHeldMetadata(sponsorId: bigint, uri: string) {
+  console.log("\n ! RESETS_VERIFICATION: what this node would publish differs from your verified metadata:");
+  const res = runSponsorScript("publishMetadata.ts", ["json"], { SPONSOR_ID: sponsorId.toString() }, true);
+  const before = await committedMetadata(uri);
+  if (!res.ok || !before) {
+    console.log(`   (could not fetch ${uri} to compare; check sponsor.plans.json and PUBLIC_RELAYER_URL)`);
+    return;
+  }
+  for (const line of describeMetadataChanges(before, JSON.parse(res.stdout) as Record<string, unknown>)) console.log(`   • ${line}`);
+}
 const read = (functionName: string, args: unknown[] = []) =>
   publicClient.readContract({ address: config.feeMarketRegistry, abi: feeMarketRegistryAbi, functionName, args } as never);
 
@@ -41,6 +70,8 @@ function freshMetadataHash(sponsorId: bigint): string | null {
   if (!res.ok) throw new Error("could not build valid metadata (see the error above); fix PLANS / SPONSOR_PROFILE and re-run");
   return /^HASH (0x[0-9a-fA-F]{64})$/m.exec(res.stdout)?.[1] ?? null;
 }
+
+let committedUri = "";
 
 async function gather(): Promise<OnboardState> {
   const [code, balanceWei, chainSponsorId] = await Promise.all([
@@ -56,6 +87,7 @@ async function gather(): Promise<OnboardState> {
   if (chainSponsorId !== 0n) {
     const sponsor = (await read("sponsors", [chainSponsorId])) as readonly [string, string, string, number, boolean];
     status = sponsor[3];
+    committedUri = sponsor[2];
     onchainHash = (await read("metadataHash", [chainSponsorId])) as string;
     freshHash = freshMetadataHash(chainSponsorId);
     payoutIsRelayerKey = sponsor[0].toLowerCase() === relayerAddress.toLowerCase();
@@ -73,6 +105,7 @@ async function gather(): Promise<OnboardState> {
     onchainEndpoint,
     publicUrl: config.publicRelayerUrl,
     payoutIsRelayerKey,
+    allowReverify: reverify,
     storageConfigured: metadataStorageReady({
       metadataStorage: process.env.METADATA_STORAGE,
       thirdwebSecret: process.env.THIRDWEB_SECRET_KEY,
@@ -94,6 +127,10 @@ async function main() {
   const plan = planOnboard(state);
   for (const b of plan.blockers) console.log(` ✗ ${b}`);
   if (plan.blockers.length) return void (process.exitCode = 1, console.log(`\n${plan.next}`));
+  if (plan.heldReverify) await explainHeldMetadata(state.chainSponsorId, committedUri);
+  if (reverify && state.status === 2 && plan.steps.some((s) => s.kind === "publish-metadata")) {
+    console.log(" ! --reverify: publishing changed metadata sends this VERIFIED sponsor back to PENDING.\n");
+  }
   if (plan.steps.length === 0) {
     console.log(plan.next);
     if (!dryRun && state.status !== 2 && state.status !== 3) ensureNodeRunning();

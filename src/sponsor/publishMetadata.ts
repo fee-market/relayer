@@ -5,6 +5,7 @@
  *   npm run sponsor:metadata:set -- <uri> <hash>   # commit an already-uploaded URI + content hash on-chain
  *   npm run sponsor:metadata:publish  # upload AND commit on-chain in one step (the common case)
  *   (internal) publishMetadata.ts hash # print the content hash only; used by sponsor:onboard
+ *   (internal) publishMetadata.ts json # print the metadata bytes only; used by sponsor:onboard's diff
  *
  * Prefer `npm run sponsor:plans:configure` (sponsor.plans.json); else edit src/sponsor/plans.ts.
  *
@@ -77,10 +78,15 @@ async function hashOnly() {
   console.log(`HASH ${metadataHashOf(serializeMetadata(metadata))}`);
 }
 
+/** Print the exact metadata bytes that would be published (no upload, no tx); used by sponsor:onboard to show a diff. */
+async function jsonOnly() {
+  console.log(serializeMetadata(buildMetadata()));
+}
+
 const cmd = process.argv[2];
-const run = { upload, set, publish, hash: hashOnly }[cmd ?? ""];
+const run = { upload, set, publish, hash: hashOnly, json: jsonOnly }[cmd ?? ""];
 if (!run) {
-  console.error(`unknown command "${cmd}". use: upload | set | publish | hash`);
+  console.error(`unknown command "${cmd}". use: upload | set | publish | hash | json`);
   process.exit(1);
 }
 run().catch((e) => {

@@ -429,6 +429,26 @@ check_plan_url() {
   fi
 }
 
+# VERIFIED, but the plans/profile/URL this node would publish differ from what the curator verified.
+reverify_prompt() {
+  local a
+  section "You are VERIFIED: publishing these changes resets you to PENDING"
+  note "The changes are listed above. Wallets keep seeing your verified profile until you publish."
+  note "Publishing sends one transaction, and the curator has to verify you again before plans can be listed."
+  note "To keep VERIFIED instead, press Enter, then put sponsor.plans.json (or PUBLIC_RELAYER_URL) back as it was."
+  ask a "Type reverify to publish the changes, or press Enter to keep VERIFIED"
+  if [ "$a" != reverify ]; then
+    ok "Nothing published; you stay VERIFIED"
+    warn "Plans can only be listed once the file matches your verified metadata again" "Undo the change, or re-run and type reverify"
+    return 0
+  fi
+  if ! sponsor sponsor:onboard -- --reverify; then
+    warn "Publishing did not finish (see above)" "It is safe to run again"
+    return 1
+  fi
+  ok "Published. You are PENDING until the curator verifies you again"
+}
+
 # ---- Register ----
 register() {
   local out a
@@ -449,6 +469,10 @@ register() {
     return 1
   fi
   printf '%s\n' "$out"
+  if printf '%s\n' "$out" | grep -q 'RESETS_VERIFICATION'; then
+    reverify_prompt
+    return $?
+  fi
   if ! printf '%s\n' "$out" | grep -q '^Steps:'; then
     ok "Registration and metadata are already up to date"
     return 0

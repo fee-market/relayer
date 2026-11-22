@@ -56,6 +56,8 @@ export interface OnboardState {
   publicUrl?: string;
   /** True when the payout address is the relayer key itself (test setups): then this process can send setEndpoint. */
   payoutIsRelayerKey?: boolean;
+  /** A VERIFIED sponsor's changed metadata is only republished (which resets it to PENDING) when this is set (--reverify). */
+  allowReverify?: boolean;
 }
 
 export type OnboardStep =
@@ -108,6 +110,8 @@ export interface Plan<S> {
   blockers: string[];
   steps: S[];
   next: string;
+  /** VERIFIED, but the metadata this node would publish differs from what the curator verified; not published. */
+  heldReverify?: boolean;
 }
 
 export function planOnboard(s: OnboardState): Plan<OnboardStep> {
@@ -122,7 +126,8 @@ export function planOnboard(s: OnboardState): Plan<OnboardStep> {
   if (!registered || s.envSponsorId !== s.chainSponsorId) steps.push({ kind: "write-env" });
 
   const needsMetadata = !registered || s.onchainHash === ZERO_HASH || s.freshHash === null || s.freshHash.toLowerCase() !== s.onchainHash.toLowerCase();
-  if (needsMetadata) steps.push({ kind: "publish-metadata" });
+  const heldReverify = needsMetadata && s.status === STATUS_VERIFIED && !s.allowReverify;
+  if (needsMetadata && !heldReverify) steps.push({ kind: "publish-metadata" });
 
   if (registered && endpointNeedsPublishing(s.onchainEndpoint, s.publicUrl)) {
     steps.push({ kind: "publish-endpoint", viaPayout: !s.payoutIsRelayerKey });
@@ -136,7 +141,12 @@ export function planOnboard(s: OnboardState): Plan<OnboardStep> {
 
   let next: string;
   if (blockers.length) next = "Fix the items above and run `npm run sponsor:onboard` again.";
-  else if (s.status === STATUS_VERIFIED && steps.length === 0) next = "You are VERIFIED. Run `npm run sponsor:go`.";
+  else if (heldReverify) {
+    next =
+      "You are VERIFIED, but your profile or plans differ from what the curator verified, so nothing was published. " +
+      "Either restore them (sponsor.plans.json / PUBLIC_RELAYER_URL), or publish the change with " +
+      "`npm run sponsor:onboard -- --reverify`, which sends you back to PENDING until the curator verifies you again.";
+  } else if (s.status === STATUS_VERIFIED && steps.length === 0) next = "You are VERIFIED. Run `npm run sponsor:go`.";
   else if (steps.length === 0) {
     next =
       `Nothing left on-chain. Keep the node running in the background so the curator can reach ${s.publicUrl || "your PUBLIC_RELAYER_URL"} ` +
@@ -146,7 +156,27 @@ export function planOnboard(s: OnboardState): Plan<OnboardStep> {
       "After these steps the CLI starts the node as a background service, then ask the curator to verify you. " +
       "When VERIFIED, run `npm run sponsor:go`.";
   }
-  return { blockers, steps, next };
+  return { blockers, steps, next, heldReverify };
+}
+
+/** One line per top-level field or plan that differs between the committed metadata and what this node would publish. */
+export function describeMetadataChanges(before: Record<string, unknown>, after: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const show = (v: unknown) => (v === undefined ? "(none)" : typeof v === "string" ? v : JSON.stringify(v));
+  for (const k of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (k === "plans") continue;
+    if (JSON.stringify(before[k]) !== JSON.stringify(after[k])) out.push(`${k}: ${show(before[k])}  →  ${show(after[k])}`);
+  }
+  const plans = (m: Record<string, unknown>) =>
+    new Map(((m.plans as { name: string }[] | undefined) ?? []).map((p) => [p.name, JSON.stringify(p)]));
+  const [pb, pa] = [plans(before), plans(after)];
+  for (const [name, p] of pa) {
+    if (!pb.has(name)) out.push(`plan added: "${name}"`);
+    else if (pb.get(name) !== p) out.push(`plan changed: "${name}"`);
+  }
+  for (const name of pb.keys()) if (!pa.has(name)) out.push(`plan removed: "${name}"`);
+  if (out.length === 0) out.push("same fields, different bytes (formatting or field order)");
+  return out;
 }
 
 // ───────────────────────────── go ─────────────────────────────
@@ -161,6 +191,8 @@ export interface GoState {
   publicUrl: string;
   mode?: GoMode; // explicit --mode
   noStart: boolean;
+  /** false when the plans/profile this node would publish differ from the committed (verified) metadata. */
+  metadataInSync?: boolean;
 }
 
 export type GoStep = { kind: "list-plans" } | { kind: "start"; mode: GoMode } | { kind: "wait-health" };
@@ -176,6 +208,12 @@ export function planGo(s: GoState): Plan<GoStep> & { mode: GoMode } {
   if (s.status !== STATUS_VERIFIED) {
     blockers.push(`Sponsor is ${statusLabel(s.status)}: only a VERIFIED sponsor can list plans. Run \`npm run sponsor:onboard\` and ask the curator to verify you.`);
   }
+  if (s.metadataInSync === false) {
+    blockers.push(
+      "Your plans or profile differ from the metadata the curator verified, so they cannot be listed as they are. " +
+        "Restore sponsor.plans.json, or publish the change with `npm run sponsor:onboard -- --reverify` (back to PENDING).",
+    );
+  }
   if (!s.noStart && mode === "docker") {
     if (!s.hasDocker) blockers.push("--mode docker needs Docker installed.");
     if (!s.hasCompose) blockers.push("docker-compose.yml not found; run from the relayer directory.");
@@ -189,7 +227,7 @@ export function planGo(s: GoState): Plan<GoStep> & { mode: GoMode } {
   const next = blockers.length
     ? "Fix the items above and run `npm run sponsor:go` again."
     : s.noStart
-      ? "Plans are listed. Start the node yourself when ready."
+      ? "After listing, start the node yourself (npm run sponsor:ensure-running)."
       : "Your node is starting; watch /admin and `npm run sponsor:doctor`.";
   return { blockers, steps, next, mode };
 }

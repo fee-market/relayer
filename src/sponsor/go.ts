@@ -41,7 +41,14 @@ async function waitForHealth(baseUrl: string, seconds = 60): Promise<boolean> {
 async function main() {
   const chainSponsorId = (await read("relayerToSponsor", [relayerAddress])) as bigint;
   let status: number | null = null;
-  if (chainSponsorId !== 0n) status = ((await read("sponsors", [chainSponsorId])) as readonly [string, string, string, number, boolean])[3];
+  let metadataInSync: boolean | undefined;
+  if (chainSponsorId !== 0n) {
+    status = ((await read("sponsors", [chainSponsorId])) as readonly [string, string, string, number, boolean])[3];
+    const onchainHash = (await read("metadataHash", [chainSponsorId])) as string;
+    const res = runSponsorScript("publishMetadata.ts", ["hash"], { SPONSOR_ID: chainSponsorId.toString() }, true);
+    const fresh = /^HASH (0x[0-9a-fA-F]{64})$/m.exec(res.stdout)?.[1];
+    if (fresh) metadataInSync = fresh.toLowerCase() === onchainHash.toLowerCase();
+  }
 
   const modeOpt = opt("mode");
   if (modeOpt && modeOpt !== "docker" && modeOpt !== "node") throw new Error("--mode must be docker or node");
@@ -53,6 +60,7 @@ async function main() {
     publicUrl: config.publicRelayerUrl,
     mode: modeOpt as GoMode | undefined,
     noStart: flag("no-start"),
+    metadataInSync,
   };
   const plan = planGo(state);
   console.log(`sponsor:go  sponsor #${chainSponsorId || "?"} (${statusLabel(status)})  mode ${state.noStart ? "(no start)" : plan.mode}\n`);
@@ -63,7 +71,7 @@ async function main() {
   if (plan.blockers.length) return void (process.exitCode = 1, console.log(`\n${plan.next}`));
   console.log("Steps:");
   for (const s of plan.steps) console.log(` • ${s.kind}${s.kind === "start" ? ` (${s.mode})` : ""}`);
-  if (flag("dry-run")) return void console.log(`\n${plan.next}`);
+  if (flag("dry-run")) return void console.log("\nDry run: nothing sent.");
 
   console.log("\n▶ list-plans");
   if (!runSponsorScript("register.ts", ["list"], { SPONSOR_ID: chainSponsorId.toString() }).ok) throw new Error("listing plans failed");
