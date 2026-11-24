@@ -63,7 +63,7 @@
     </div>
     <div class="card" style="padding:0;overflow:auto">
       <table>
-        <thead><tr><th>time</th><th>outcome</th><th>sub</th><th>delegator</th><th>redeem tx</th><th>gas (wei)</th><th>reason</th></tr></thead>
+        <thead><tr><th id="th-time">time</th><th>elapsed</th><th>outcome</th><th>sub</th><th>delegator</th><th>redeem tx</th><th>gas (wei)</th><th>reason</th></tr></thead>
         <tbody id="logs"></tbody>
       </table>
     </div>
@@ -88,7 +88,17 @@ async function api(path){
 
 function fmtWei(wei){ if(wei==null) return "—"; const n=Number(wei)/1e18; return n>0 && n<0.0001 ? n.toExponential(2) : n.toFixed(6); }
 function short(a){ return a ? a.slice(0,6)+"…"+a.slice(-4) : "—"; }
-function ago(ts){ const s=Math.floor((Date.now()-ts)/1000); return s<60?s+"s":Math.floor(s/60)+"m"; }
+// A length of time as days, hours, minutes and seconds, starting at the largest unit that is not zero: "2d 3h 0m 12s", "4m 9s", "7s".
+function elapsed(sec){
+  let s = Math.max(0, Math.floor(sec));
+  const parts = [[86400,"d"],[3600,"h"],[60,"m"],[1,"s"]].map(([size,unit]) => { const n = Math.floor(s/size); s -= n*size; return [n,unit]; });
+  const first = parts.findIndex(([n]) => n > 0);
+  return parts.slice(first < 0 ? 3 : first).map(([n,unit]) => n+unit).join(" ");
+}
+// The moment itself, in the viewer's own time zone: "24 Nov 2026, 14:03:12".
+const WHEN = new Intl.DateTimeFormat(undefined, { day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit", second:"2-digit", hourCycle:"h23" });
+function when(ts){ return WHEN.format(new Date(ts)); }
+function zone(){ const p = new Intl.DateTimeFormat(undefined, { timeZoneName:"short" }).formatToParts(new Date()).find(x => x.type === "timeZoneName"); return p ? p.value : "local"; }
 
 async function refresh(){
   try {
@@ -102,21 +112,22 @@ async function refresh(){
       ${card("Success rate", (c.successRate*100).toFixed(1)+'%')}
       ${card("Gas spent", fmtWei(c.totalGasUsedWei)+' <span class="muted">native</span>')}
       ${card("Rejected / reverted", c.rejected+' / '+(c.reverted+c.error))}
-      ${card("Uptime", Math.floor(c.uptimeSec/3600)+'h '+Math.floor((c.uptimeSec%3600)/60)+'m')}
+      ${card("Uptime", elapsed(c.uptimeSec))}
       ${card("Relayer", '<span class="mono">'+short(n.relayer)+'</span>')}
     `;
     const f = document.getElementById("filter").value;
     const l = await api("/admin/logs?limit=200" + (f?("&outcome="+f):""));
     document.getElementById("logs").innerHTML = l.logs.map(row => `
       <tr>
-        <td class="muted">${ago(row.ts)} ago</td>
+        <td class="mono" title="${new Date(row.ts).toISOString()}">${when(row.ts)}</td>
+        <td class="muted">${elapsed((Date.now()-row.ts)/1000)} ago</td>
         <td class="o-${row.outcome}">${row.outcome}</td>
         <td>${row.subscriptionId ?? "—"}</td>
         <td class="mono">${short(row.delegator)}</td>
         <td class="mono">${row.redeemTx ? short(row.redeemTx) : "—"}</td>
         <td class="mono">${row.gasUsedWei ?? "—"}</td>
         <td class="muted">${row.reason ?? ""}</td>
-      </tr>`).join("") || `<tr><td colspan="7" class="muted" style="padding:16px">No relays yet.</td></tr>`;
+      </tr>`).join("") || `<tr><td colspan="8" class="muted" style="padding:16px">No relays yet.</td></tr>`;
   } catch(e){
     if(String(e.message).includes("unauthorized")){ logout(); document.getElementById("err").textContent="Invalid token"; }
     else console.error(e);
@@ -129,6 +140,7 @@ async function start(){
   try { await api("/admin/stats"); }
   catch(e){ show("gate"); document.getElementById("err").textContent = e.message; return; }
   localStorage.setItem(KEY, token);
+  document.getElementById("th-time").textContent = "time (" + zone() + ")";
   show("app"); refresh();
   clearInterval(timer); timer = setInterval(refresh, 5000);
 }
