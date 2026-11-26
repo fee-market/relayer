@@ -94,6 +94,7 @@ If you clone as root, the root part copies the repo to `/home/<node user>/relaye
 | `npm run sponsor:rotate` | Rotate relayer or payout (→ PENDING again). Needs `SPONSOR_ADMIN_PRIVATE_KEY` on the CLI. |
 | `npm run sponsor:accept` | Accept pending payout role. |
 | `npm run sponsor:withdraw` | Withdraw earnings (payout key). |
+| `npm run sponsor:settle` | Move what time-plan subscribers have accrued into your earnings, once, now (the node also does it every `SETTLE_INTERVAL_MS`). `-- <id ...>` adds subscriptions the node never served; `-- --dry-run` only shows what is pending. Signed with `SPONSOR_ADMIN_PRIVATE_KEY` if set on the CLI, else the relayer key. |
 | `npm run sponsor:relayers` | Manage relayer set. |
 | `npm run listing:gen` | Preview metadata / `listPlan` args (no txs). |
 | `npm run key:encrypt` / `key:check` | Encrypted keystore helpers. |

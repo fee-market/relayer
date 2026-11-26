@@ -8,6 +8,8 @@ import { m } from "./services/telemetry.js";
 import { bearerToken, safeEqual } from "./lib/security.js";
 import { getCounters, getLogs, type RelayOutcome } from "./services/stats.js";
 import { getEarnings, getSponsorStatus } from "./services/registry.js";
+import { chainSettleDeps, knownTimePlanSubs, pendingEarnings } from "./services/timePlans.js";
+import { cached } from "./lib/cache.js";
 import { publicClient, relayerAddress } from "./lib/clients.js";
 
 const STATUS_LABELS = ["UNVERIFIED", "PENDING", "VERIFIED", "REVOKED"];
@@ -58,11 +60,15 @@ export function adminRouter(): Router {
     "/stats",
     requireAuth,
     asyncHandler(async (_req, res) => {
-      const [balance, blockNumber, sponsor, earnings] = await Promise.all([
+      const [balance, blockNumber, sponsor, earnings, pending] = await Promise.all([
         publicClient.getBalance({ address: relayerAddress }),
         publicClient.getBlockNumber(),
         getSponsorStatus().catch(() => null),
         getEarnings(config.dashboardEarningsToken).catch(() => 0n),
+        // One read per known time-plan subscription, and the page polls every few seconds: shared for a minute.
+        cached(`pendingTimePlanEarnings:${config.dashboardEarningsToken}`, 60_000, async () =>
+          knownTimePlanSubs.size() === 0 ? 0n : pendingEarnings((await chainSettleDeps()).details, knownTimePlanSubs, config.dashboardEarningsToken),
+        ).catch(() => 0n),
       ]);
       res.json({
         ok: true,
@@ -79,6 +85,9 @@ export function adminRouter(): Router {
           payout: sponsor?.payout ?? null,
           earningsToken: config.dashboardEarningsToken,
           claimableEarnings: earnings.toString(),
+          // Earned by time plans but not yet moved to the claimable earnings (the node settles on SETTLE_INTERVAL_MS).
+          pendingTimePlanEarnings: pending.toString(),
+          timePlanSubscriptions: knownTimePlanSubs.size(),
         },
         counters: getCounters(),
       });

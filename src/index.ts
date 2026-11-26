@@ -27,6 +27,7 @@ import { randomUUID } from "node:crypto";
 import { adminRouter } from "./admin.js";
 import { getCounters, record } from "./services/stats.js";
 import { profitCheck } from "./services/profit.js";
+import { answerIfOverBudget, countSend, noteSubscription, startSettler, stopSettler } from "./services/timePlans.js";
 import { usesSponsorLevelLock } from "./services/batchValidation.js";
 import { isSponsorRelayer } from "./services/registry.js";
 import type { Plan } from "./services/registry.js";
@@ -127,6 +128,8 @@ interface Ctx {
   delegator?: string;
   label: string; // "redemption" | "subscribe" | "topUp", used in error text
   plan?: Plan; // set for /relay: the plan whose per-request price the profit guard compares gas against
+  /** Called once the transaction is out, whatever becomes of it (mined, reverted, not confirmed yet): the gas is committed. */
+  onBroadcast?: () => void;
 }
 
 /**
@@ -173,6 +176,7 @@ async function executeSponsored(res: Response, req: ExecutionRequest, ctx: Ctx) 
 
   try {
     const { hash, receipt } = await redeemAndConfirm(req, pf.gas!);
+    ctx.onBroadcast?.();
     if (receipt.status !== "success") {
       record({ outcome: "reverted", subscriptionId: ctx.subscriptionId, delegator: ctx.delegator, redeemTx: hash });
       res.status(502).json({ ok: false, error: `${ctx.label} reverted`, redeemTx: hash });
@@ -182,6 +186,7 @@ async function executeSponsored(res: Response, req: ExecutionRequest, ctx: Ctx) 
   } catch (err) {
     if (err instanceof ReceiptTimeoutError) {
       // Not a failure: the transaction is out there and the node keeps replacing it if it is stuck. Say so, with the hash.
+      ctx.onBroadcast?.();
       record({ outcome: "error", subscriptionId: ctx.subscriptionId, delegator: ctx.delegator, redeemTx: err.hash, reason: "not confirmed within the wait window" });
       res.status(504).json({ ok: false, pending: true, error: "transaction sent but not confirmed yet", redeemTx: err.hash });
       return null;
@@ -222,7 +227,15 @@ app.post("/relay", rateLimit, sponsoredEndpoint(
       record({ outcome: "rejected", subscriptionId: relayReq.subscriptionId, delegator, reason: validation.reason });
       return void res.status(422).json({ ok: false, error: validation.reason });
     }
-    const done = await executeSponsored(res, relayReq, { subscriptionId: relayReq.subscriptionId, delegator, label: "redemption", plan: validation.plan });
+    // A time plan charges by the clock, so its sends are bounded per day (TIME_PLAN_DAILY_SENDS): refused here, before
+    // any gas is spent. Requests for one subscription run one at a time, so the check and the count cannot race.
+    noteSubscription(relayReq.subscriptionId, validation.plan);
+    const overBudget = answerIfOverBudget(res, relayReq.subscriptionId, validation.plan);
+    if (overBudget) return void record({ outcome: "rejected", subscriptionId: relayReq.subscriptionId, delegator, reason: overBudget });
+    const done = await executeSponsored(res, relayReq, {
+      subscriptionId: relayReq.subscriptionId, delegator, label: "redemption", plan: validation.plan,
+      onBroadcast: () => countSend(relayReq.subscriptionId, validation.plan),
+    });
     if (!done) return;
     record({ outcome: "success", subscriptionId: relayReq.subscriptionId, delegator, redeemTx: done.hash, gasUsedWei: gasUsedWei(done.receipt) });
     res.json({ ok: true, redeemTx: done.hash, gasUsed: done.receipt.gasUsed.toString() });
@@ -250,6 +263,7 @@ app.post("/subscribe", rateLimit, sponsoredEndpoint(
     const done = await executeSponsored(res, subReq, { delegator, label: "subscribe" });
     if (!done) return;
     const subscriptionId = findSubscriptionId(done.receipt.logs);
+    noteSubscription(subscriptionId, validation.plan);
     record({ outcome: "success", subscriptionId: subscriptionId?.toString(), delegator, redeemTx: done.hash, gasUsedWei: gasUsedWei(done.receipt) });
     res.json({
       ok: true,
@@ -281,6 +295,7 @@ app.post("/topup", rateLimit, sponsoredEndpoint(
     }
     const done = await executeSponsored(res, topUpReq, { subscriptionId, delegator, label: "topUp" });
     if (!done) return;
+    noteSubscription(subscriptionId, validation.plan);
     record({ outcome: "success", subscriptionId, delegator, redeemTx: done.hash, gasUsedWei: gasUsedWei(done.receipt) });
     res.json({
       ok: true,
@@ -311,6 +326,7 @@ try {
 const server = app.listen(config.port, config.host, () => {
   console.log(`feemarket sponsor node listening on ${config.host}:${config.port}`);
   void startWatcher();
+  startSettler();
   console.log(`  relayer address : ${relayerAddress}`);
   console.log(`  signing key     : ${describeSource(config.signer)}`);
   console.log(`  sponsorId       : ${config.sponsorId}`);
@@ -332,6 +348,7 @@ async function shutdown(signal: string) {
   console.log(`${signal}: draining (up to ${config.drainMs} ms, ${gate.active()} request(s) running, ${inflightCount()} transaction(s) in flight)`);
   setDraining();
   stopWatcher();
+  stopSettler();
   server.close();
   server.closeIdleConnections?.();
   const deadline = Date.now() + config.drainMs;

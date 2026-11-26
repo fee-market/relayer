@@ -108,6 +108,7 @@ async function refresh(){
       ${card("Status", '<span class="pill '+o.status+'">'+o.status+'</span>')}
       ${card("Relayer balance", fmtWei(n.relayerBalanceWei)+' <span class="muted">native</span>')}
       ${card("Claimable earnings", (Number(o.claimableEarnings)/1e6).toFixed(2)+' <span class="muted">USDC</span>')}
+      ${card("Earned, not settled yet", (Number(o.pendingTimePlanEarnings ?? 0)/1e6).toFixed(2)+' <span class="muted">USDC</span>')}
       ${card("Relayed (ok)", c.success+' <span class="muted">/ '+c.total+'</span>')}
       ${card("Success rate", (c.successRate*100).toFixed(1)+'%')}
       ${card("Gas spent", fmtWei(c.totalGasUsedWei)+' <span class="muted">native</span>')}

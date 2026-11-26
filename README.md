@@ -147,6 +147,7 @@ When in doubt:
 | `sponsor:onboard` | Register / metadata / keep node up |
 | `sponsor:status` / `doctor` | Status & readiness |
 | `sponsor:go` | After VERIFIED: list plans + start |
+| `sponsor:settle` | Collect what time-plan subscribers have accrued, once, now (the node also does it daily) |
 
 See [COMMANDS.md](COMMANDS.md) for the full list (proxy, rotate, withdraw, tests, …).
 
@@ -163,9 +164,25 @@ See [COMMANDS.md](COMMANDS.md) for the full list (proxy, rotate, withdraw, tests
 
 Common responses: `200` · `422` validation · `429` rate limit · `503` busy/low balance · `504` sent, not yet confirmed.
 
+Two refusals are about the subscription itself, and apply to `/relay` only:
+
+- `422 "the subscriber has asked to leave: gas-free is off until the refund request is cancelled"`: the subscriber has
+  requested a refund (any kind of plan). The registry would still take the charge while the refund delay runs, so the
+  node refuses instead; cancelling the request turns sponsoring back on. Top-ups are not affected.
+- `429 "daily limit of 200 sends for this time plan reached; next send in 3h 12m"` with `Retry-After`: a subscription
+  on a time plan has used `TIME_PLAN_DAILY_SENDS` in the last 24 hours. A send counts once its transaction is out,
+  whatever becomes of it; a refused request does not count.
+
 ## Ops notes
 
 - Keep the relayer key hot with a **limited** balance; top up from cold storage.
 - Cap spend with `MAX_GAS_POL` (e.g. `0.1`) / `MAX_GAS_UNITS`.
+- Time plans (charged by the day, not by the send): `TIME_PLAN_DAILY_SENDS` (default 200; 0 = off) is the most sends one
+  subscription may have sponsored in any 24 hours, and `SETTLE_INTERVAL_MS` (default 24 h; 0 = off) is how often the node
+  moves what those subscribers have accrued into your withdrawable earnings (`settleMany`, at most 50 subscriptions per
+  transaction, paid by the relayer). Both are kept in `STATE_DIR` and are per node process: two nodes for one sponsor each
+  count their own sends and each know only the time-plan subscriptions they served themselves
+  (`npm run sponsor:settle -- <id ...>` covers any others).
+- The dashboard shows what time plans have earned but the node has not settled yet, next to the claimable earnings.
 - One relayer key per process.
 - Publishing new metadata or rotating keys returns a VERIFIED sponsor to **PENDING** until re-verified.

@@ -222,6 +222,13 @@ export const config = {
     idempotencyTtlMs: Number(env("IDEMPOTENCY_TTL_MS", "600000")),
     // How long on-chain reads that change rarely (plans, sponsor status, gas price) are reused.
     readCacheMs: Number(env("READ_CACHE_MS", "15000")),
+    // The most sends one subscription on a TIME plan (the SUBSCRIPTION model, with or without a quota) may have
+    // sponsored in any 24 hours. A time plan charges by the clock, not by the send, so without a budget one subscriber
+    // can spend far more of the sponsor's gas than the plan pays for. 0 = off. Counted per node process.
+    timePlanDailySends: Number(env("TIME_PLAN_DAILY_SENDS", "200")),
+    // How often the node collects what its time-plan subscribers have accrued (registry.settleMany). A time plan earns
+    // by the clock, but the money only moves to the sponsor's withdrawable earnings when someone settles. 0 = off.
+    settleIntervalMs: Number(env("SETTLE_INTERVAL_MS", "86400000")),
   },
 } as const;
 

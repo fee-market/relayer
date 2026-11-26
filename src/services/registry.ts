@@ -101,6 +101,22 @@ export function isSponsorRelayer(account: Address): Promise<boolean | null> {
   });
 }
 
+/** What the node answers once a subscriber has asked for a refund. The wallet matches on this text. */
+export const REFUND_REQUESTED_REASON = "the subscriber has asked to leave: gas-free is off until the refund request is cancelled";
+
+/**
+ * When the subscriber asked for their refund (0 = they have not). The registry keeps charging and serving while the
+ * refund delay runs, so without this check a subscriber on a time plan could ask to leave, use the plan for the whole
+ * delay and pay for one day of it. A registry without the getter answers 0: nothing is refused that was not before.
+ */
+export async function refundRequestedAt(id: bigint): Promise<bigint> {
+  try {
+    return (await publicClient.readContract({ address: config.feeMarketRegistry, abi: feeMarketRegistryAbi, functionName: "refundRequestedAt", args: [id] })) as bigint;
+  } catch {
+    return 0n;
+  }
+}
+
 /** The registry's own words for why `chargeUsage` would revert, keyed by error selector (what `canSponsor` returns). */
 const CAN_SPONSOR_REASONS: Record<string, string> = Object.fromEntries(
   ([
@@ -155,8 +171,13 @@ export async function checkSubscriptionFunds(
   }
   // The registry's own answer is authoritative where it has one (halt, pause, verification, quota, expiry, escrow, all in
   // one call). The checks below are the fallback for a registry without `canSponsor`.
-  const verdict = await canSponsor(subscriptionId, sub.user);
-  if (verdict) return verdict.ok ? { ok: true, plan, sub } : verdict;
+  // The refund request is read alongside it (one more eth_call, in parallel): the registry would still accept the
+  // charge, so this is the node's own rule, for every pricing model. The registry's refusal, when it has one, is
+  // reported first: it is the more basic fact (ended, expired, paused).
+  const [verdict, leaving] = await Promise.all([canSponsor(subscriptionId, sub.user), refundRequestedAt(subscriptionId)]);
+  if (verdict && !verdict.ok) return verdict;
+  if (leaving !== 0n) return { ok: false, reason: REFUND_REQUESTED_REASON };
+  if (verdict) return { ok: true, plan, sub };
   // Every model charges out of the escrow, so nothing can be paid for once it is empty (an ended subscription
   // always is). Reject here rather than letting the sponsor pay gas for a charge that reverts.
   if (sub.balance === 0n) return { ok: false, reason: "subscription has no escrow left" };

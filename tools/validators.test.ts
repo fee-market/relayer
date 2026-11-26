@@ -18,6 +18,8 @@ const chain = {
   ended: new Set<bigint>(),
   endedSupported: true,
   canSponsor: null as null | { ok: boolean; reason: Hex },
+  refundRequestedAt: new Map<bigint, bigint>(),
+  refundSupported: true,
   tokenBalance: 0n,
   allowance: 0n,
 };
@@ -60,6 +62,10 @@ const node = createServer((req, res) => {
           if (!chain.canSponsor) return reply({ error: { code: 3, message: "execution reverted", data: "0x" } });
           return reply({ result: encodeFunctionResult({ abi: feeMarketRegistryAbi, functionName: "canSponsor", result: [chain.canSponsor.ok, chain.canSponsor.reason] }) });
         }
+        if (functionName === "refundRequestedAt") {
+          if (!chain.refundSupported) return reply({ error: { code: 3, message: "execution reverted", data: "0x" } });
+          return reply({ result: encodeFunctionResult({ abi: feeMarketRegistryAbi, functionName: "refundRequestedAt", result: chain.refundRequestedAt.get(args![0] as bigint) ?? 0n }) });
+        }
         if (functionName === "subscriptionEnded") {
           if (!chain.endedSupported) return reply({ error: { code: 3, message: "execution reverted", data: "0x" } });
           return reply({ result: encodeFunctionResult({ abi: feeMarketRegistryAbi, functionName: "subscriptionEnded", result: chain.ended.has(args![0] as bigint) }) });
@@ -95,7 +101,7 @@ const OWNER = "0x00000000000000000000000000000000000000aa" as Address;
 const OTHER = "0x00000000000000000000000000000000000000bb" as Address;
 const reason = (r: { ok: boolean; reason?: string }) => r.reason ?? "";
 const reset = () => {
-  chain.subs.clear(); chain.plans.clear(); chain.ended.clear();
+  chain.subs.clear(); chain.plans.clear(); chain.ended.clear(); chain.refundRequestedAt.clear(); chain.refundSupported = true;
   chain.endedSupported = true; chain.canSponsor = null; chain.tokenBalance = 1_000_000n; chain.allowance = 1_000_000n;
   chain.plans.set(1n, { sponsorId: 1n, model: 0, token: USDC, price: 10_000n, quota: 0n, period: 0n, active: true });
   chain.subs.set(7n, { planId: 1n, user: OWNER, balance: 500_000n, txns: 0n, expiry: 0n });
@@ -239,6 +245,49 @@ await test("relay: a registry without canSponsor falls back to the local checks"
   chain.canSponsor = null;
   chain.ended.add(7n);
   assert.match((await checkSubscriptionFunds(7n) as { reason: string }).reason, /has ended/);
+});
+
+// -------------------------------------------------------------------------- /relay after a refund request
+const LEAVING = "the subscriber has asked to leave: gas-free is off until the refund request is cancelled";
+await test("relay: once the subscriber has asked for a refund, sends are refused, for every pricing model", async () => {
+  for (const model of [0, 1, 2]) {
+    reset();
+    chain.plans.set(1n, { ...chain.plans.get(1n)!, model, quota: 100n, period: 86_400n });
+    chain.subs.set(7n, { ...chain.subs.get(7n)!, txns: 100n, expiry: BigInt(Math.floor(Date.now() / 1000) + 9999) });
+    chain.canSponsor = { ok: true, reason: "0x00000000" }; // the registry itself would still take the charge
+    assert.equal((await checkSubscriptionFunds(7n)).ok, true, `model ${model}: served before the request`);
+    chain.refundRequestedAt.set(7n, 1_795_000_000n);
+    const r = await checkSubscriptionFunds(7n);
+    assert.equal(r.ok, false, `model ${model}`);
+    assert.equal((r as { reason: string }).reason, LEAVING, `model ${model}: the exact text the wallet matches on`);
+    chain.refundRequestedAt.delete(7n); // cancelRefund puts it back to 0
+    assert.equal((await checkSubscriptionFunds(7n)).ok, true, `model ${model}: served again once the request is cancelled`);
+  }
+});
+await test("relay: the refund request is also honoured against a registry without canSponsor", async () => {
+  reset();
+  chain.canSponsor = null;
+  chain.refundRequestedAt.set(7n, 1n);
+  assert.equal((await checkSubscriptionFunds(7n) as { reason: string }).reason, LEAVING);
+});
+await test("relay: the registry's own refusal is reported first (it is the more basic fact)", async () => {
+  const { toFunctionSelector } = await import("viem");
+  reset();
+  chain.refundRequestedAt.set(7n, 1n);
+  chain.canSponsor = { ok: false, reason: toFunctionSelector("SponsorPaused()") };
+  assert.match((await checkSubscriptionFunds(7n) as { reason: string }).reason, /paused/);
+});
+await test("relay: a registry without the refund getter refuses nothing it did not refuse before", async () => {
+  reset();
+  chain.refundSupported = false;
+  chain.refundRequestedAt.set(7n, 1n);
+  assert.equal((await checkSubscriptionFunds(7n)).ok, true);
+});
+await test("topup: a refund request does not stop a top-up (only sends are affected)", async () => {
+  reset();
+  chain.refundRequestedAt.set(7n, 1n);
+  const r = await validateTopUpRequest(request(OWNER, [topUp(7n, 50_000n)]));
+  assert.equal(r.ok, true, reason(r));
 });
 
 node.close();
