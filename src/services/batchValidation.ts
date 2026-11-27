@@ -131,7 +131,8 @@ export function validatePinnedDelegation(
 /**
  * A sponsored batch is paid for as ONE operation however much it does, and the sponsor pays its gas. So bound it:
  * at most MAX_BATCH_CALLS calls and MAX_BATCH_CALLDATA_BYTES of data, and (optionally) only ALLOWED_TARGETS as call
- * targets. The FeeMarketRegistry is always allowed because the final charge call is addressed to it.
+ * targets. The FeeMarketRegistry is always allowed because the final charge call is addressed to it, and so is
+ * FeeMarketAgreements when the node is set up with it (the acceptance call that goes with subscribe).
  */
 export function validateBatchLimits(executionCallData: `0x${string}`): { ok: true } | { ok: false; reason: string } {
   let executions: Execution[];
@@ -145,7 +146,12 @@ export function validateBatchLimits(executionCallData: `0x${string}`): { ok: tru
   if (size(executionCallData) > p.maxBatchCalldataBytes) return { ok: false, reason: `batch is larger than ${p.maxBatchCalldataBytes} bytes` };
   if (p.allowedTargets.length > 0) {
     const registry = config.feeMarketRegistry.toLowerCase();
-    const bad = executions.find((e) => e.target.toLowerCase() !== registry && !p.allowedTargets.includes(e.target.toLowerCase()));
+    // The agreements contract only records the caller's own acceptance; a subscribe batch has to be able to call it.
+    const agreements = config.feeMarketAgreements?.toLowerCase();
+    const bad = executions.find((e) => {
+      const t = e.target.toLowerCase();
+      return t !== registry && t !== agreements && !p.allowedTargets.includes(t);
+    });
     if (bad) return { ok: false, reason: `call target ${bad.target} is not allowed by this sponsor` };
   }
   return { ok: true };

@@ -21,7 +21,8 @@ DELEGATOR_IMPLEMENTATION:delegatorImplementation
 LIMITED_CALLS_ENFORCER:limitedCallsEnforcer
 EXACT_EXECUTION_BATCH_ENFORCER:exactExecutionBatchEnforcer
 TIMESTAMP_ENFORCER:timestampEnforcer
-UPGRADE_TIMELOCK:upgradeTimelock"
+UPGRADE_TIMELOCK:upgradeTimelock
+FEE_MARKET_AGREEMENTS:feeMarketAgreements"
 
 if [ -t 1 ]; then
   B=$'\033[1m'; D=$'\033[2m'; R=$'\033[31m'; G=$'\033[32m'; Y=$'\033[33m'; C=$'\033[36m'; N=$'\033[0m'

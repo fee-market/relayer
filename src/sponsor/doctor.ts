@@ -9,11 +9,12 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Address } from "viem";
 import { config } from "../config.js";
-import { delegationManagerAbi, feeMarketRegistryAbi } from "../abi.js";
+import { delegationManagerAbi, feeMarketAgreementsAbi, feeMarketRegistryAbi } from "../abi.js";
 import { publicClient, relayerAddress } from "../lib/clients.js";
 import { registryBuildCode } from "./registryCode.js";
 import { classifyAccount } from "./safeBatch.js";
 import {
+  checkAgreement,
   checkBalance,
   checkEndpoint,
   checkPayoutWallet,
@@ -79,6 +80,17 @@ async function main() {
     publicClient.readContract({ ...mgr, functionName: "owner" }).catch(() => undefined),
   ]);
   add(...checkManagerState(paused as boolean | undefined, owner as string | undefined));
+
+  const agreements = config.feeMarketAgreements;
+  if (!agreements) {
+    add(...checkAgreement(null, false, undefined));
+  } else {
+    const [code, version] = await Promise.all([
+      publicClient.getCode({ address: agreements }).catch(() => undefined),
+      publicClient.readContract({ address: agreements, abi: feeMarketAgreementsAbi, functionName: "currentVersion" }).catch(() => undefined),
+    ]);
+    add(...checkAgreement(agreements, !!code && code !== "0x", version as bigint | undefined));
+  }
 
   section("Relayer key");
   add(checkBalance(await publicClient.getBalance({ address: relayerAddress })));

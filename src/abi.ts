@@ -68,3 +68,30 @@ export const delegationStructAbi = {
     { name: "signature", type: "bytes" },
   ],
 } as const;
+
+/** FeeMarketAgreements: only what the node reads and what it recognises in a subscribe batch. */
+export const feeMarketAgreementsAbi = [
+  { type: "function", name: "currentVersion", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "uint256" }] },
+  {
+    type: "function",
+    name: "current",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      { name: "version", type: "uint256" },
+      { name: "hash", type: "bytes32" },
+      { name: "uri", type: "string" },
+    ],
+  },
+  {
+    type: "function",
+    name: "accept",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "planId", type: "uint256" },
+      { name: "agreementHash", type: "bytes32" },
+      { name: "signature", type: "bytes" },
+    ],
+    outputs: [],
+  },
+] as const;

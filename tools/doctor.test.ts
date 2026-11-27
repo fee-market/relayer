@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { toFunctionSelector } from "viem";
-import { addressFromSlot, checkBalance, checkManagerState, checkRegistryBuild, checkSponsor, hasSelector, isPublicRpc, lintPolicy, type PolicyInput } from "../src/sponsor/doctorChecks.js";
+import { addressFromSlot, checkAgreement, checkBalance, checkManagerState, checkRegistryBuild, checkSponsor, hasSelector, isPublicRpc, lintPolicy, type PolicyInput } from "../src/sponsor/doctorChecks.js";
 import { setEnv } from "../src/sponsor/envFile.js";
 import { registryBuildCode } from "../src/sponsor/registryCode.js";
 
@@ -133,6 +133,18 @@ test("real-IP header: without TRUST_PROXY it satisfies the shared-bucket warning
   const withHeader = lintPolicy({ ...published, clientIpHeader: "cf-connecting-ip" });
   assert.equal(withHeader.some((f) => f.level === "warn" && /rate-limit bucket/.test(f.msg)), false);
   assert.ok(withHeader.some((f) => f.level === "ok" && /cf-connecting-ip/.test(f.msg)));
+});
+
+test("the sponsor agreement: off, not published yet, required, and the two ways it would block every subscription", () => {
+  const A = "0x00000000000000000000000000000000000a9ee5";
+  assert.match(checkAgreement(null, false, undefined)[0].msg, /not required \(FEE_MARKET_AGREEMENTS is not set\)/);
+  assert.deepEqual(levels(checkAgreement(null, false, undefined)), ["ok"]);
+  assert.match(checkAgreement(A, true, 0n)[0].msg, /not required yet/);
+  const on = checkAgreement(A, true, 3n);
+  assert.deepEqual(levels(on), ["ok"]);
+  assert.match(on[0].msg, /required for new subscriptions .*version 3/);
+  assert.deepEqual(levels(checkAgreement(A, false, undefined)), ["fail"], "an address with no contract behind it");
+  assert.deepEqual(levels(checkAgreement(A, true, undefined)), ["fail"], "a contract that cannot be read");
 });
 
 console.log(`\n${passed}/${total} passed`);

@@ -289,6 +289,8 @@ else
     if [ -n "$want" ] && [ "$(lower "$got")" != "$(lower "$want")" ]; then
       # the timelock is only watched for alerts; empty is allowed
       if [ "$var" = UPGRADE_TIMELOCK ] && [ -z "$got" ]; then continue; fi
+      # the sponsor agreement is optional: empty means subscriptions are taken without it
+      if [ "$var" = FEE_MARKET_AGREEMENTS ] && [ -z "$got" ]; then continue; fi
       WRONG="$WRONG $var"
     fi
   done

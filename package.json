@@ -60,6 +60,7 @@
     "test:signer": "tsx tools/signer.test.ts",
     "test:profit": "tsx tools/profit.test.ts",
     "test:timeplans": "tsx tools/timeplans.test.ts",
+    "test:agreement": "tsx tools/agreement.test.ts",
     "test:sponsorset": "tsx tools/sponsorset.test.ts",
     "test:walletparity": "tsx tools/walletparity.test.ts",
     "test:explorer": "tsx tools/explorer.test.ts",

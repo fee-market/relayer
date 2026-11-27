@@ -3,6 +3,7 @@ import { config, PricingModel } from "../config.js";
 import { getPlan, type Plan } from "./registry.js";
 import { checkUserCanPay } from "./payment.js";
 import { decodeBatch, decodeUint256PairCall, validateApproveCall, validateDelegationShape } from "./batchValidation.js";
+import { AGREEMENT_REQUIRED_REASON, AGREEMENT_UNREADABLE_REASON, currentAgreement, validateAcceptCall, type CurrentAgreement } from "./agreement.js";
 import type { SubscribeRequest } from "../types.js";
 
 const SUBSCRIBE_SELECTOR = toFunctionSelector("subscribe(uint256,uint256)"); // 0x84370813
@@ -19,6 +20,13 @@ const SUBSCRIBE_SELECTOR = toFunctionSelector("subscribe(uint256,uint256)"); // 
  * subscribe() at all. Without this, /subscribe would be an unbounded "sponsor pays for literally
  * anything" endpoint gated only by caveats. `amount` must also cover the plan's price for
  * Bulk/Subscription models — defense in depth regardless of what the contract itself enforces.
+ *
+ * With FEE_MARKET_AGREEMENTS set and a version published there, the shape is instead
+ *
+ *   [ (optional) approve, agreements.accept(planId, currentHash, signature), registry.subscribe(planId, amount) ]
+ *
+ * and a batch without the acceptance (immediately before subscribe, for the same plan and the current text) is refused:
+ * that is what makes accepting the sponsor agreement a condition of subscribing through this node (services/agreement.ts).
  */
 export interface SubscribeValidationResult {
   ok: boolean;
@@ -38,7 +46,17 @@ export async function validateSubscribeRequest(req: SubscribeRequest): Promise<S
   } catch (e) {
     return { ok: false, reason: `could not decode execution batch: ${(e as Error).message}` };
   }
-  if (executions.length < 1 || executions.length > 2) {
+  // Read before anything else is decided: if the contract cannot be read, nothing is let through unaccepted.
+  let agreement: CurrentAgreement | null;
+  try {
+    agreement = await currentAgreement();
+  } catch {
+    return { ok: false, reason: AGREEMENT_UNREADABLE_REASON };
+  }
+  if (agreement) {
+    if (executions.length < 2) return { ok: false, reason: AGREEMENT_REQUIRED_REASON };
+    if (executions.length > 3) return { ok: false, reason: "batch must be [accept, subscribe] or [approve, accept, subscribe]" };
+  } else if (executions.length < 1 || executions.length > 2) {
     return { ok: false, reason: "batch must be [subscribe] or [approve, subscribe]" };
   }
 
@@ -65,16 +83,24 @@ export async function validateSubscribeRequest(req: SubscribeRequest): Promise<S
     return { ok: false, reason: `amount ${amount} is below plan price ${plan.price}` };
   }
 
-  if (executions.length === 2) {
+  // What comes before subscribe: the acceptance (when one is required) directly before it, and before that at most an approve.
+  let before = executions.slice(0, -1);
+  if (agreement) {
+    const accepted = validateAcceptCall(before[before.length - 1], planId, agreement);
+    if (!accepted.ok) return accepted;
+    before = before.slice(0, -1);
+  }
+  const approves = before.length === 1;
+  if (approves) {
     try {
-      validateApproveCall(executions[0], plan);
+      validateApproveCall(before[0], plan);
     } catch (e) {
       return { ok: false, reason: `first call is not a valid approve(): ${(e as Error).message}` };
     }
   }
 
   const user = req.delegations[req.delegations.length - 1].delegator as `0x${string}`;
-  const pay = await checkUserCanPay({ user, token: plan.paymentToken, amount, batchApproves: executions.length === 2 });
+  const pay = await checkUserCanPay({ user, token: plan.paymentToken, amount, batchApproves: approves });
   if (!pay.ok) return pay;
 
   return { ok: true, planId, amount, plan };

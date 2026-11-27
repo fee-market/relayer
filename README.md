@@ -114,6 +114,7 @@ Copy [`.env.example`](.env.example). Minimum:
 | `SPONSOR_ID` | Written by `sponsor:onboard` |
 | `SPONSOR_PAYOUT_ADDRESS` | Cold wallet for earnings |
 | `DASHBOARD_TOKEN` | Optional `/admin` |
+| `FEE_MARKET_AGREEMENTS` | Optional: the `FeeMarketAgreements` contract. Set, and with a version published there, `/subscribe` refuses a subscription whose batch does not also record the subscriber's acceptance of the sponsor agreement on-chain. Wallet versions from before the agreement cannot subscribe through a node with it on. Empty = not required |
 
 **Not in `.env`:** sponsor name, region, description, website, support URL, plan terms → `sponsor.plans.json` via `sponsor:plans:configure`.
 
@@ -172,6 +173,20 @@ Two refusals are about the subscription itself, and apply to `/relay` only:
 - `429 "daily limit of 200 sends for this time plan reached; next send in 3h 12m"` with `Retry-After`: a subscription
   on a time plan has used `TIME_PLAN_DAILY_SENDS` in the last 24 hours. A send counts once its transaction is out,
   whatever becomes of it; a refused request does not count.
+
+With `FEE_MARKET_AGREEMENTS` set and a version published there, `/subscribe` takes the batch
+`[approve (optional), agreements.accept(planId, hash, signature), registry.subscribe(planId, amount)]` and refuses anything else:
+
+- `422 "this sponsor requires the sponsor agreement to be accepted in the same transaction as subscribe"`: the batch has
+  no acceptance directly before `subscribe`. This is what a wallet from before the agreement gets.
+- `422 "the sponsor agreement in this request is not the current version"`: the acceptance names another text than the
+  one published now.
+- `422 "the agreement was accepted for a different plan than the one being subscribed to"`.
+- `422 "could not read the sponsor agreement contract just now, so this subscription was not sent: try again in a moment"`:
+  the node could not read the contract, and does not let a subscription through unaccepted.
+
+The contract checks the signature itself; a bad one makes the batch fail in the node's simulation, before any gas is spent.
+`/topup` and `/relay` are not affected.
 
 ## Ops notes
 

@@ -218,6 +218,18 @@ export function checkBalance(wei: bigint): Finding {
   return ok(`relayer balance ${wei} wei`);
 }
 
+/**
+ * Whether subscribing through this node requires the sponsor agreement to be accepted on-chain. `version` is what
+ * FeeMarketAgreements.currentVersion() answered: undefined when it could not be read.
+ */
+export function checkAgreement(address: string | null, hasCode: boolean, version: bigint | undefined): Finding[] {
+  if (!address) return [ok("sponsor agreement: not required (FEE_MARKET_AGREEMENTS is not set)")];
+  if (!hasCode) return [fail(`FEE_MARKET_AGREEMENTS=${address} has no code: every subscription through this node would be refused`)];
+  if (version === undefined) return [fail(`could not read FeeMarketAgreements at ${address}: subscriptions are refused while it cannot be read`)];
+  if (version === 0n) return [ok(`sponsor agreement: not required yet (${address} has no published version)`)];
+  return [ok(`sponsor agreement: required for new subscriptions (${address}, version ${version}); wallets that do not send the acceptance cannot subscribe here`)];
+}
+
 /** The framework manager can be paused by its owner, which halts every redemption (and so every sponsor). */
 export function checkManagerState(paused: boolean | undefined, owner: string | undefined): Finding[] {
   if (paused === undefined) return [warn("could not read paused() on DelegationManager (not the expected framework build?)")];

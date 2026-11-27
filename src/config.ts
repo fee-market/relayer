@@ -11,6 +11,12 @@ function envAddr(key: string, fallback?: string): Address {
   return getAddress(env(key, fallback));
 }
 
+/** An address that may be left out: unset or empty means "not used". */
+function envOptionalAddr(key: string, fallback = ""): Address | null {
+  const v = (process.env[key] ?? fallback).trim();
+  return v ? getAddress(v) : null;
+}
+
 function envBool(key: string, fallback: string): boolean {
   return env(key, fallback).toLowerCase() === "true";
 }
@@ -79,6 +85,11 @@ export const config = {
   // Locks a delegation to a SPONSOR (any key in its relayer set) instead of one relayer key. Accepted in place of
   // RedeemerRestrictionEnforcer; terms = registry + sponsorId. Default: the closed-test deployment on Polygon.
   sponsorRelayerEnforcer: envAddr("SPONSOR_RELAYER_ENFORCER", "0x051F314E5312341B3F0e0da2024a56A0cD0cacBB"),
+  // FeeMarketAgreements: where a subscriber's acceptance of the sponsor agreement is recorded on-chain, by their own
+  // account, in the same batch as subscribe. Set, and with a version published there, /subscribe refuses a batch that
+  // does not carry the acceptance (see services/agreement.ts). Unset or empty = off. The contract is not deployed yet,
+  // so there is no default; once it is, its address goes in as the second argument here (and in deployments/137.json).
+  feeMarketAgreements: envOptionalAddr("FEE_MARKET_AGREEMENTS"),
 
   // --- this sponsor ---
   sponsorId: BigInt(env("SPONSOR_ID", "1")),
